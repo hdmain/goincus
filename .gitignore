@@ -6,3 +6,5 @@ bin/
 .vscode/
 *.log
 vendor/
+**/__pycache__/
+*.pyc
