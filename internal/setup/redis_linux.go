@@ -47,10 +47,8 @@ func detectExistingRedis() (*redisEndpoint, bool) {
 	}
 
 	// Config-only fallback: redis is installed but not yet listening.
-	if ep, ok := redisFromConfigFiles(); ok {
-		if _, err := exec.LookPath("redis-server"); err == nil || _, err2 := exec.LookPath("redis-cli"); err2 == nil {
-			return ep, true
-		}
+	if ep, ok := redisFromConfigFiles(); ok && redisBinaryPresent() {
+		return ep, true
 	}
 	return nil, false
 }
