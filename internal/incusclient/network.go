@@ -228,11 +228,6 @@ if [ -z "$IFACE" ]; then
 fi
 test -n "$IFACE"
 
-ip link set "$IFACE" up || true
-ip -4 addr flush dev "$IFACE" || true
-ip addr add "$IP/$MASK" dev "$IFACE" || ip addr replace "$IP/$MASK" dev "$IFACE"
-ip route replace default via "$GW" dev "$IFACE" || true
-
 # resolv.conf is often a symlink into /run/systemd/resolve (missing early in boot).
 umount /etc/resolv.conf 2>/dev/null || true
 rm -f /etc/resolv.conf
@@ -241,6 +236,12 @@ printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver %%s\n' "$GW" > /etc/r
 
 if command -v netplan >/dev/null 2>&1 || [ -d /etc/netplan ]; then
   mkdir -p /etc/netplan
+  # Disable cloud-init DHCP so it cannot fight our static address.
+  if [ -d /etc/cloud ]; then
+    mkdir -p /etc/cloud/cloud.cfg.d
+    printf 'network: {config: disabled}\n' > /etc/cloud/cloud.cfg.d/99-goincus-disable-network.cfg
+  fi
+  # Neutralize common DHCP netplan snippets (keep files, override with higher priority).
   cat > /etc/netplan/99-goincus.yaml <<EOF
 network:
   version: 2
@@ -249,6 +250,7 @@ network:
     $IFACE:
       dhcp4: false
       dhcp6: false
+      optional: true
       addresses: [$IP/$MASK]
       routes:
         - to: default
@@ -257,10 +259,9 @@ network:
         addresses: [1.1.1.1, 8.8.8.8, $GW]
 EOF
   chmod 600 /etc/netplan/99-goincus.yaml
+  # netplan apply often flaps the NIC and drops manual addresses — OK, we re-add below.
   netplan apply 2>/dev/null || true
-fi
-
-if [ -d /etc/network ]; then
+elif [ -d /etc/network ]; then
   mkdir -p /etc/network/interfaces.d
   cat > /etc/network/interfaces.d/99-goincus <<EOF
 auto $IFACE
@@ -270,15 +271,14 @@ iface $IFACE inet static
     gateway $GW
     dns-nameservers 1.1.1.1 8.8.8.8 $GW
 EOF
-fi
-
-if [ -d /etc/systemd/network ] || command -v networkctl >/dev/null 2>&1; then
+elif [ -d /etc/systemd/network ] || command -v networkctl >/dev/null 2>&1; then
   mkdir -p /etc/systemd/network
   cat > /etc/systemd/network/10-goincus.network <<EOF
 [Match]
 Name=$IFACE
 
 [Network]
+DHCP=no
 Address=$IP/$MASK
 Gateway=$GW
 DNS=1.1.1.1
@@ -288,7 +288,25 @@ EOF
   systemctl restart systemd-networkd 2>/dev/null || true
 fi
 
-ip -4 addr show dev "$IFACE" | grep -F "$IP"
+# Always force the runtime address LAST — netplan/networkd may have just wiped eth0.
+apply_runtime() {
+  ip link set "$IFACE" up || true
+  ip -4 addr flush dev "$IFACE" || true
+  ip addr add "$IP/$MASK" dev "$IFACE" || ip addr replace "$IP/$MASK" dev "$IFACE"
+  ip route replace default via "$GW" dev "$IFACE" || true
+}
+apply_runtime
+
+# Brief settle; retry once if verification fails.
+for _ in 1 2 3; do
+  if ip -4 addr show dev "$IFACE" | grep -Fq "$IP"; then
+    exit 0
+  fi
+  sleep 1
+  apply_runtime
+done
+ip -4 addr show dev "$IFACE" || true
+exit 1
 `, ip, gw, mask, netmask)
 
 	stdout, stderr, code, err := c.exec(name, script)
