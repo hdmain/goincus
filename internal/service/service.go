@@ -16,6 +16,7 @@ import (
 	"github.com/hdmain/goincus/internal/models"
 	"github.com/hdmain/goincus/internal/ports"
 	"github.com/hdmain/goincus/internal/redisstore"
+	"github.com/hdmain/goincus/internal/secrets"
 )
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,61}[a-z0-9]$`)
@@ -134,19 +135,25 @@ func (s *Service) CreateInstance(ctx context.Context, req models.CreateInstanceR
 	id := uuid.New()
 	incusName := fmt.Sprintf("goincus-%s", id.String()[:8])
 
+	rootPass, err := secrets.RandomPassword(18)
+	if err != nil {
+		return nil, fmt.Errorf("generate root password: %w", err)
+	}
+
 	inst := &models.Instance{
-		ID:        id,
-		Name:      name,
-		IncusName: incusName,
-		Image:     image,
-		Status:    models.StatusPending,
-		CPUCores:  cpu,
-		MemoryMB:  mem,
-		StorageGB: storage,
-		Processes: procs,
-		CreatedAt: now,
-		UpdatedAt: now,
-		Ports:     []models.PortMapping{},
+		ID:           id,
+		Name:         name,
+		IncusName:    incusName,
+		Image:        image,
+		Status:       models.StatusPending,
+		CPUCores:     cpu,
+		MemoryMB:     mem,
+		StorageGB:    storage,
+		Processes:    procs,
+		RootPassword: rootPass,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		Ports:        []models.PortMapping{},
 	}
 
 	if err := s.store.CreateInstance(ctx, inst); err != nil {
@@ -165,13 +172,14 @@ func (s *Service) provision(ctx context.Context, inst *models.Instance, internal
 	_ = s.store.UpdateInstanceStatus(ctx, inst.ID, models.StatusCreating, "")
 
 	if err := s.incus.CreateContainer(incusclient.CreateArgs{
-		Name:      inst.IncusName,
-		Image:     inst.Image,
-		CPUCores:  inst.CPUCores,
-		MemoryMB:  inst.MemoryMB,
-		StorageGB: inst.StorageGB,
-		Processes: inst.Processes,
-		Profiles:  s.cfg.Incus.Profiles,
+		Name:         inst.IncusName,
+		Image:        inst.Image,
+		CPUCores:     inst.CPUCores,
+		MemoryMB:     inst.MemoryMB,
+		StorageGB:    inst.StorageGB,
+		Processes:    inst.Processes,
+		Profiles:     s.cfg.Incus.Profiles,
+		RootPassword: inst.RootPassword,
 	}); err != nil {
 		s.fail(ctx, inst.ID, fmt.Errorf("create container: %w", err))
 		return
@@ -179,6 +187,14 @@ func (s *Service) provision(ctx context.Context, inst *models.Instance, internal
 
 	if err := s.incus.EnsureStarted(inst.IncusName); err != nil {
 		s.fail(ctx, inst.ID, fmt.Errorf("start container: %w", err))
+		return
+	}
+
+	// Give the guest a moment to boot before apt/ssh setup.
+	time.Sleep(5 * time.Second)
+
+	if err := s.bootstrapSSH(ctx, inst); err != nil {
+		s.fail(ctx, inst.ID, err)
 		return
 	}
 
@@ -192,6 +208,26 @@ func (s *Service) provision(ctx context.Context, inst *models.Instance, internal
 	}
 	_ = s.redis.SetInstanceState(ctx, inst.ID.String(), string(models.StatusRunning), 24*time.Hour)
 	s.logger.Info("instance provisioned", "id", inst.ID, "incus", inst.IncusName)
+}
+
+func (s *Service) bootstrapSSH(ctx context.Context, inst *models.Instance) error {
+	pass := inst.RootPassword
+	if pass == "" {
+		generated, err := secrets.RandomPassword(18)
+		if err != nil {
+			return fmt.Errorf("generate root password: %w", err)
+		}
+		pass = generated
+		inst.RootPassword = pass
+		if err := s.store.UpdateRootPassword(ctx, inst.ID, pass); err != nil {
+			return fmt.Errorf("persist root password: %w", err)
+		}
+	}
+	if err := s.incus.EnsureSSH(inst.IncusName, pass); err != nil {
+		return fmt.Errorf("bootstrap ssh: %w", err)
+	}
+	_ = s.incus.WaitForSSHD(inst.IncusName, 45*time.Second)
+	return nil
 }
 
 func (s *Service) ensureDefaultPorts(ctx context.Context, inst *models.Instance, internalPorts []int) error {
@@ -309,7 +345,7 @@ func (s *Service) syncStatusFromIncus(ctx context.Context, inst *models.Instance
 	_ = s.redis.SetInstanceState(ctx, inst.ID.String(), string(next), 24*time.Hour)
 }
 
-// StartInstance starts a stopped container and completes missing default port maps.
+// StartInstance starts a stopped container, bootstraps SSH if needed, and completes missing ports.
 func (s *Service) StartInstance(ctx context.Context, id uuid.UUID) (*models.Instance, error) {
 	inst, err := s.store.GetInstance(ctx, id)
 	if err != nil {
@@ -320,6 +356,9 @@ func (s *Service) StartInstance(ctx context.Context, id uuid.UUID) (*models.Inst
 	}
 	if err := s.incus.EnsureStarted(inst.IncusName); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
+	}
+	if err := s.bootstrapSSH(ctx, inst); err != nil {
+		return nil, err
 	}
 	if err := s.ensureDefaultPorts(ctx, inst, s.cfg.Ports.DefaultInternalPorts); err != nil {
 		return nil, err

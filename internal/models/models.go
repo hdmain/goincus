@@ -30,6 +30,7 @@ type Instance struct {
 	MemoryMB     int            `json:"memory_mb"`
 	StorageGB    int            `json:"storage_gb"`
 	Processes    int            `json:"processes"`
+	RootPassword string         `json:"root_password,omitempty"`
 	ErrorMessage string         `json:"error_message,omitempty"`
 	Ports        []PortMapping  `json:"ports,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`

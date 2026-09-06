@@ -56,7 +56,15 @@ sudo systemctl enable --now goincus
 4. Write `/etc/goincus/config.yaml` with generated DB password and API keys
 5. Install the systemd unit and SQL migrations
 
-## API auth
+## SSH access
+
+New instances get OpenSSH installed automatically and a generated `root_password`
+(returned by create/get/repair). Map host port for container 22, then:
+
+```bash
+ssh root@HOST -p HOST_PORT
+# password from JSON field root_password
+```
 
 All endpoints except `/healthz` and `/api/v1/health` require:
 

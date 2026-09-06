@@ -116,13 +116,20 @@ func (s *Store) Migrate(ctx context.Context, dir string) error {
 func (s *Store) CreateInstance(ctx context.Context, inst *models.Instance) error {
 	const q = `
 		INSERT INTO instances (
-			id, name, incus_name, image, status, cpu_cores, memory_mb, storage_gb, processes, error_message, created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`
+			id, name, incus_name, image, status, cpu_cores, memory_mb, storage_gb, processes, root_password, error_message, created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
 	_, err := s.pool.Exec(ctx, q,
 		inst.ID, inst.Name, inst.IncusName, inst.Image, inst.Status,
-		inst.CPUCores, inst.MemoryMB, inst.StorageGB, inst.Processes,
+		inst.CPUCores, inst.MemoryMB, inst.StorageGB, inst.Processes, inst.RootPassword,
 		inst.ErrorMessage, inst.CreatedAt, inst.UpdatedAt,
 	)
+	return err
+}
+
+// UpdateRootPassword stores the instance root password.
+func (s *Store) UpdateRootPassword(ctx context.Context, id uuid.UUID, password string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE instances SET root_password = $2, updated_at = NOW() WHERE id = $1`, id, password)
 	return err
 }
 
@@ -140,13 +147,13 @@ func (s *Store) UpdateInstanceStatus(ctx context.Context, id uuid.UUID, status m
 func (s *Store) GetInstance(ctx context.Context, id uuid.UUID) (*models.Instance, error) {
 	const q = `
 		SELECT id, name, incus_name, image, status, cpu_cores, memory_mb, storage_gb, processes,
-		       error_message, created_at, updated_at
+		       root_password, error_message, created_at, updated_at
 		FROM instances WHERE id = $1 AND status <> 'deleted'`
 	inst := &models.Instance{}
 	err := s.pool.QueryRow(ctx, q, id).Scan(
 		&inst.ID, &inst.Name, &inst.IncusName, &inst.Image, &inst.Status,
 		&inst.CPUCores, &inst.MemoryMB, &inst.StorageGB, &inst.Processes,
-		&inst.ErrorMessage, &inst.CreatedAt, &inst.UpdatedAt,
+		&inst.RootPassword, &inst.ErrorMessage, &inst.CreatedAt, &inst.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -167,13 +174,13 @@ func (s *Store) GetInstance(ctx context.Context, id uuid.UUID) (*models.Instance
 func (s *Store) GetInstanceByName(ctx context.Context, name string) (*models.Instance, error) {
 	const q = `
 		SELECT id, name, incus_name, image, status, cpu_cores, memory_mb, storage_gb, processes,
-		       error_message, created_at, updated_at
+		       root_password, error_message, created_at, updated_at
 		FROM instances WHERE name = $1 AND status <> 'deleted'`
 	inst := &models.Instance{}
 	err := s.pool.QueryRow(ctx, q, name).Scan(
 		&inst.ID, &inst.Name, &inst.IncusName, &inst.Image, &inst.Status,
 		&inst.CPUCores, &inst.MemoryMB, &inst.StorageGB, &inst.Processes,
-		&inst.ErrorMessage, &inst.CreatedAt, &inst.UpdatedAt,
+		&inst.RootPassword, &inst.ErrorMessage, &inst.CreatedAt, &inst.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -193,7 +200,7 @@ func (s *Store) GetInstanceByName(ctx context.Context, name string) (*models.Ins
 func (s *Store) ListInstances(ctx context.Context) ([]models.Instance, error) {
 	const q = `
 		SELECT id, name, incus_name, image, status, cpu_cores, memory_mb, storage_gb, processes,
-		       error_message, created_at, updated_at
+		       root_password, error_message, created_at, updated_at
 		FROM instances WHERE status <> 'deleted'
 		ORDER BY created_at DESC`
 	rows, err := s.pool.Query(ctx, q)
@@ -208,7 +215,7 @@ func (s *Store) ListInstances(ctx context.Context) ([]models.Instance, error) {
 		if err := rows.Scan(
 			&inst.ID, &inst.Name, &inst.IncusName, &inst.Image, &inst.Status,
 			&inst.CPUCores, &inst.MemoryMB, &inst.StorageGB, &inst.Processes,
-			&inst.ErrorMessage, &inst.CreatedAt, &inst.UpdatedAt,
+			&inst.RootPassword, &inst.ErrorMessage, &inst.CreatedAt, &inst.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

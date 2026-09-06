@@ -210,13 +210,14 @@ func (c *Client) EnsureUnprivilegedProfile() error {
 
 // CreateArgs describes a new NAT VPS container.
 type CreateArgs struct {
-	Name      string
-	Image     string
-	CPUCores  int
-	MemoryMB  int
-	StorageGB int
-	Processes int
-	Profiles  []string
+	Name         string
+	Image        string
+	CPUCores     int
+	MemoryMB     int
+	StorageGB    int
+	Processes    int
+	Profiles     []string
+	RootPassword string
 }
 
 // CreateContainer provisions an unprivileged LXC container with resource limits.
@@ -236,6 +237,11 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 	}
 	profiles = c.filterAvailableProfiles(profiles)
 
+	cfg := ResourceConfig(args.CPUCores, args.MemoryMB, args.Processes)
+	if args.RootPassword != "" {
+		cfg["cloud-init.user-data"] = CloudInitUserData(args.RootPassword)
+	}
+
 	req := api.InstancesPost{
 		Name: args.Name,
 		Type: api.InstanceTypeContainer,
@@ -247,7 +253,7 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 		},
 		InstancePut: api.InstancePut{
 			Profiles: profiles,
-			Config:   ResourceConfig(args.CPUCores, args.MemoryMB, args.Processes),
+			Config:   cfg,
 			Devices: map[string]map[string]string{
 				"root": {
 					"type": "disk",
