@@ -24,9 +24,9 @@ manage_resolv_conf: true
 resolv_conf:
   nameservers: ['1.1.1.1', '8.8.8.8']
 runcmd:
-  - [ bash, -lc, "PASS=$(echo '%s' | base64 -d); echo root:$PASS | chpasswd" ]
+  - [ bash, -lc, "PASS=$(echo '%s' | base64 -d); echo root:$PASS | chpasswd; unset PASS" ]
   - [ bash, -lc, "ssh-keygen -A" ]
-  - [ bash, -lc, "mkdir -p /etc/ssh/sshd_config.d; printf '%%s\\n' 'PermitRootLogin yes' 'PasswordAuthentication yes' 'AddressFamily inet' 'ListenAddress 0.0.0.0' 'ListenAddress 127.0.0.1' > /etc/ssh/sshd_config.d/99-goincus.conf" ]
+  - [ bash, -lc, "mkdir -p /etc/ssh/sshd_config.d; printf '%%s\\n' 'PermitRootLogin yes' 'PasswordAuthentication yes' 'AddressFamily inet' 'ListenAddress 0.0.0.0' 'ListenAddress 127.0.0.1' 'MaxAuthTries 4' 'LoginGraceTime 30' 'PermitEmptyPasswords no' 'X11Forwarding no' > /etc/ssh/sshd_config.d/99-goincus.conf" ]
   - [ bash, -lc, "systemctl disable --now ssh.socket 2>/dev/null || true; systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true; systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true" ]
 `, b64)
 }
@@ -49,9 +49,11 @@ func (c *Client) EnsureSSH(name, rootPassword string) error {
 	}
 
 	b64 := base64.StdEncoding.EncodeToString([]byte(rootPassword))
-	script := fmt.Sprintf(`set -eux
+	// set -eu without -x so the root password is never echoed into journals/error_message.
+	script := fmt.Sprintf(`set -eu
 PASS="$(echo '%s' | base64 -d)"
 echo "root:${PASS}" | chpasswd
+unset PASS
 ssh-keygen -A
 mkdir -p /etc/ssh/sshd_config.d /run/sshd
 cat > /etc/ssh/sshd_config.d/99-goincus.conf <<'EOF'
@@ -62,6 +64,14 @@ UsePAM yes
 AddressFamily inet
 ListenAddress 0.0.0.0
 ListenAddress 127.0.0.1
+MaxAuthTries 4
+LoginGraceTime 30
+MaxStartups 10:30:60
+ClientAliveInterval 30
+ClientAliveCountMax 3
+X11Forwarding no
+AllowTcpForwarding no
+PermitEmptyPasswords no
 EOF
 systemctl disable --now ssh.socket 2>/dev/null || true
 systemctl disable --now sshd.socket 2>/dev/null || true
@@ -72,7 +82,6 @@ systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || servi
 sshd -t || /usr/sbin/sshd -t || true
 for i in $(seq 1 30); do
   if ss -ltn | grep -E '[:.]22[[:space:]]' >/dev/null 2>&1; then
-    ss -ltn | grep -E '[:.]22[[:space:]]' || true
     exit 0
   fi
   if [ "$i" = "5" ] || [ "$i" = "15" ]; then
@@ -82,20 +91,22 @@ for i in $(seq 1 30); do
 done
 echo "sshd failed to listen on :22" >&2
 ss -ltn || true
-systemctl status ssh --no-pager || systemctl status sshd --no-pager || true
+systemctl status ssh --no-pager 2>/dev/null || systemctl status sshd --no-pager 2>/dev/null || true
 exit 1
 `, b64)
 
 	stdout, stderr, code, err := c.exec(name, script)
 	if err != nil {
-		return fmt.Errorf("configure ssh: %w; stderr=%s stdout=%s", err, stderr, stdout)
+		return fmt.Errorf("configure ssh: %w", err)
 	}
 	if code != 0 {
-		return fmt.Errorf("configure ssh exited %d; stderr=%s stdout=%s", code, stderr, stdout)
+		return fmt.Errorf("configure ssh exited %d", code)
 	}
 	if err := c.WaitForSSHD(name, 90*time.Second); err != nil {
-		return fmt.Errorf("%w; last configure stdout=%s stderr=%s", err, stdout, stderr)
+		return err
 	}
+	_ = stdout
+	_ = stderr
 	return nil
 }
 

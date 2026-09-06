@@ -126,6 +126,10 @@ func runServe(args []string) int {
 		logger.Error("load config", "path", *configPath, "err", err)
 		return 1
 	}
+	if err := config.EnsureFilePermissions(*configPath); err != nil {
+		logger.Error("insecure config permissions", "path", *configPath, "err", err)
+		return 1
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

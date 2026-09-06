@@ -405,8 +405,8 @@ func installSupportFiles() error {
 	unit := `[Unit]
 Description=goincus — Incus NAT VPS provisioning API
 Documentation=https://github.com/hdmain/goincus
-After=network-online.target postgresql.service redis-server.service redis.service incus.service
-Wants=network-online.target
+After=network-online.target postgresql.service redis-server.service redis.service incus.service goincus-net.service
+Wants=network-online.target goincus-net.service
 Requires=incus.service
 
 [Service]
@@ -422,7 +422,13 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/incus /run/incus /var/log/goincus /etc/goincus
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+ReadWritePaths=/var/lib/incus /run/incus /var/log/goincus
+ReadOnlyPaths=/etc/goincus
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 StandardOutput=journal
 StandardError=journal
@@ -434,7 +440,47 @@ WantedBy=multi-user.target
 	if err := os.WriteFile(DefaultUnitPath, []byte(unit), 0o644); err != nil {
 		return err
 	}
+	_ = os.MkdirAll("/usr/local/libexec/goincus", 0o755)
+	natScript := `#!/bin/sh
+set -eu
+BR="${GOINCUS_BRIDGE:-incusbr0}"
+SUBNET="${GOINCUS_SUBNET:-10.72.160.0/24}"
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
+mkdir -p /etc/sysctl.d
+printf 'net.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-goincus-forward.conf
+IPT="$(command -v iptables-nft 2>/dev/null || command -v iptables || true)"
+[ -n "$IPT" ] || exit 0
+$IPT -t nat -C POSTROUTING -s "$SUBNET" ! -d "$SUBNET" -j MASQUERADE 2>/dev/null \
+  || $IPT -t nat -A POSTROUTING -s "$SUBNET" ! -d "$SUBNET" -j MASQUERADE
+$IPT -C FORWARD -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I FORWARD 1 -i "$BR" -j ACCEPT
+$IPT -C FORWARD -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I FORWARD 1 -o "$BR" -j ACCEPT
+if $IPT -L DOCKER-USER -n >/dev/null 2>&1; then
+  $IPT -C DOCKER-USER -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -i "$BR" -j ACCEPT
+  $IPT -C DOCKER-USER -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -o "$BR" -j ACCEPT
+fi
+exit 0
+`
+	if err := os.WriteFile("/usr/local/libexec/goincus/ensure-host-nat.sh", []byte(natScript), 0o755); err != nil {
+		return err
+	}
+	netUnit := `[Unit]
+Description=goincus host NAT/FORWARD for Incus bridge (Docker-safe)
+After=network-online.target incus.service docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/goincus/ensure-host-nat.sh
+
+[Install]
+WantedBy=multi-user.target
+`
+	if err := os.WriteFile("/etc/systemd/system/goincus-net.service", []byte(netUnit), 0o644); err != nil {
+		return err
+	}
 	_ = run("systemctl", "daemon-reload")
+	_ = run("systemctl", "enable", "--now", "goincus-net")
 	return WriteEmbeddedMigrations(MigrationsDir)
 }
 

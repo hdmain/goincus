@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -253,15 +254,38 @@ func setupHintPath() string {
 	return "/etc/goincus/config.yaml"
 }
 
-// ValidAPIKey reports whether key is configured.
+// ValidAPIKey reports whether key is configured (constant-time compare).
 func (c *Config) ValidAPIKey(key string) bool {
-	if key == "" {
+	if key == "" || len(c.Auth.APIKeys) == 0 {
 		return false
 	}
+	ok := false
 	for _, k := range c.Auth.APIKeys {
-		if k != "" && k == key {
-			return true
+		if k == "" {
+			continue
+		}
+		a := []byte(k)
+		b := []byte(key)
+		if len(a) != len(b) {
+			subtle.ConstantTimeCompare(a, a)
+			continue
+		}
+		if subtle.ConstantTimeCompare(a, b) == 1 {
+			ok = true
 		}
 	}
-	return false
+	return ok
+}
+
+// EnsureFilePermissions warns (via returned error) when the config is group/world-readable.
+func EnsureFilePermissions(path string) error {
+	st, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	mode := st.Mode().Perm()
+	if mode&0o077 != 0 {
+		return fmt.Errorf("%s mode is %#o (expected 0600); run: chmod 600 %s", path, mode, path)
+	}
+	return nil
 }

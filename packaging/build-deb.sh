@@ -25,6 +25,9 @@ install -m 0755 "${BINARY}" "${PKG_DIR}/usr/local/bin/goincus"
 # Never ship live /etc/goincus/config.yaml — apt upgrades would overwrite secrets.
 install -m 0644 "${ROOT}/configs/config.yaml" "${PKG_DIR}/usr/share/goincus/config.yaml.example"
 install -m 0644 "${ROOT}/deploy/systemd/goincus.service" "${PKG_DIR}/etc/systemd/system/goincus.service"
+install -m 0644 "${ROOT}/deploy/systemd/goincus-net.service" "${PKG_DIR}/etc/systemd/system/goincus-net.service"
+mkdir -p "${PKG_DIR}/usr/local/libexec/goincus"
+install -m 0755 "${ROOT}/deploy/scripts/ensure-host-nat.sh" "${PKG_DIR}/usr/local/libexec/goincus/ensure-host-nat.sh"
 install -m 0644 "${ROOT}/migrations/"*.sql "${PKG_DIR}/usr/share/goincus/migrations/"
 
 # Keep an empty config dir owned by root.
@@ -57,11 +60,15 @@ case "$1" in
       systemctl daemon-reload || true
     fi
     if [ ! -f /etc/goincus/config.yaml ]; then
-      echo "goincus: no config yet. Run: sudo goincus init && sudo systemctl enable --now goincus"
+      echo "goincus: no config yet. Run: sudo goincus init && sudo systemctl enable --now goincus-net goincus"
     else
       # Upgrade path: keep secrets; bounce service if it was enabled.
-      if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled goincus >/dev/null 2>&1; then
-        systemctl try-restart goincus >/dev/null 2>&1 || true
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl enable goincus-net >/dev/null 2>&1 || true
+        systemctl start goincus-net >/dev/null 2>&1 || true
+        if systemctl is-enabled goincus >/dev/null 2>&1; then
+          systemctl try-restart goincus >/dev/null 2>&1 || true
+        fi
       fi
       echo "goincus upgraded. Config preserved at /etc/goincus/config.yaml"
     fi

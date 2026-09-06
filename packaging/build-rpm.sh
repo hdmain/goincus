@@ -18,6 +18,8 @@ mkdir -p "${WORK}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 install -m 0755 "${BINARY}" "${WORK}/SOURCES/goincus"
 cp "${ROOT}/configs/config.yaml" "${WORK}/SOURCES/config.yaml.example"
 cp "${ROOT}/deploy/systemd/goincus.service" "${WORK}/SOURCES/"
+cp "${ROOT}/deploy/systemd/goincus-net.service" "${WORK}/SOURCES/"
+cp "${ROOT}/deploy/scripts/ensure-host-nat.sh" "${WORK}/SOURCES/"
 cp "${ROOT}/migrations/"*.sql "${WORK}/SOURCES/"
 
 cat > "${WORK}/SPECS/goincus.spec" <<EOF
@@ -38,31 +40,39 @@ instances using Incus, with dynamic host port mapping and resource limits.
 mkdir -p %{buildroot}/usr/local/bin
 mkdir -p %{buildroot}/etc/goincus
 mkdir -p %{buildroot}/usr/share/goincus/migrations
+mkdir -p %{buildroot}/usr/local/libexec/goincus
 mkdir -p %{buildroot}/etc/systemd/system
 mkdir -p %{buildroot}/opt/goincus
 mkdir -p %{buildroot}/var/log/goincus
 install -m 0755 %{_sourcedir}/goincus %{buildroot}/usr/local/bin/goincus
 install -m 0644 %{_sourcedir}/config.yaml.example %{buildroot}/usr/share/goincus/config.yaml.example
 install -m 0644 %{_sourcedir}/goincus.service %{buildroot}/etc/systemd/system/goincus.service
+install -m 0644 %{_sourcedir}/goincus-net.service %{buildroot}/etc/systemd/system/goincus-net.service
+install -m 0755 %{_sourcedir}/ensure-host-nat.sh %{buildroot}/usr/local/libexec/goincus/ensure-host-nat.sh
 install -m 0644 %{_sourcedir}/*.sql %{buildroot}/usr/share/goincus/migrations/
 printf '%s\\n' '# Live config is created by: sudo goincus init' > %{buildroot}/etc/goincus/.keep
 
 %files
 /usr/local/bin/goincus
 /usr/share/goincus/config.yaml.example
+/usr/local/libexec/goincus/ensure-host-nat.sh
 /etc/goincus/.keep
 /etc/systemd/system/goincus.service
+/etc/systemd/system/goincus-net.service
 /usr/share/goincus/migrations/*
 %dir /etc/goincus
+%dir /usr/local/libexec/goincus
 %dir /opt/goincus
 %dir /var/log/goincus
 
 %post
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
+  systemctl enable goincus-net >/dev/null 2>&1 || true
+  systemctl start goincus-net >/dev/null 2>&1 || true
 fi
 if [ ! -f /etc/goincus/config.yaml ]; then
-  echo "goincus: no config yet. Run: sudo goincus init && sudo systemctl enable --now goincus"
+  echo "goincus: no config yet. Run: sudo goincus init && sudo systemctl enable --now goincus-net goincus"
 else
   if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled goincus >/dev/null 2>&1; then
     systemctl try-restart goincus >/dev/null 2>&1 || true
@@ -74,6 +84,7 @@ fi
 if [ "\$1" = "0" ] && command -v systemctl >/dev/null 2>&1; then
   systemctl stop goincus >/dev/null 2>&1 || true
   systemctl disable goincus >/dev/null 2>&1 || true
+  systemctl disable goincus-net >/dev/null 2>&1 || true
 fi
 EOF
 

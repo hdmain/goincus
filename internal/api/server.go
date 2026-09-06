@@ -73,6 +73,10 @@ func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []models.Instance{}
 	}
+	// Production: never bulk-export root passwords.
+	for i := range list {
+		list[i].RootPassword = ""
+	}
 	writeJSON(w, http.StatusOK, list)
 }
 

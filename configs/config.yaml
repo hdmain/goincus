@@ -1,4 +1,5 @@
 server:
+  # Production: prefer 127.0.0.1 behind nginx/caddy TLS, or keep 0.0.0.0 with firewall.
   host: "0.0.0.0"
   port: 9603
   read_timeout: 30s

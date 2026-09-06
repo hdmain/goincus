@@ -61,7 +61,7 @@ Package upgrades do **not** overwrite `/etc/goincus/config.yaml` (template lives
 ## SSH access
 
 New instances get OpenSSH installed automatically and a generated `root_password`
-(returned by create/get/repair). Map host port for container 22, then:
+(returned by **create / get / repair** — not by list). Map host port for container 22, then:
 
 ```bash
 ssh root@HOST -p HOST_PORT
@@ -75,6 +75,22 @@ Authorization: Bearer <api_key>
 ```
 
 or `X-API-Key: <api_key>`.
+
+## Production hardening
+
+- Config must be `chmod 600 /etc/goincus/config.yaml` (enforced at serve start)
+- API key compare is constant-time; failed auth is rate-limited per IP
+- `GET /instances` omits `root_password` (fetch one instance to read it)
+- Guest sshd: MaxAuthTries, LoginGraceTime, no empty passwords, no X11
+- Host NAT/FORWARD persisted via `goincus-net.service` (Docker-safe)
+- Put TLS in front (nginx/caddy) if the API is reachable from the internet
+- Open host firewall for mapped VPS ports, e.g. `20000-29999/tcp`
+
+```bash
+sudo systemctl enable --now goincus-net goincus
+sudo ufw allow 9603/tcp
+sudo ufw allow 20000:29999/tcp
+```
 
 ## Examples
 
