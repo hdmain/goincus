@@ -165,7 +165,7 @@ func Default() *Config {
 		Incus: IncusConfig{
 			SocketPath:    "",
 			Project:       "default",
-			StoragePool:   "default",
+			StoragePool:   "goincus",
 			Network:       "incusbr0",
 			ImageServer:   "https://images.linuxcontainers.org",
 			ImageProtocol: "simplestreams",

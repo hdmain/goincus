@@ -117,7 +117,7 @@ func installDependencies(installRedis bool) error {
 		if err := runEnv(map[string]string{"DEBIAN_FRONTEND": "noninteractive"}, "apt-get", "update", "-y"); err != nil {
 			return err
 		}
-		pkgs := []string{"postgresql", "postgresql-contrib", "curl", "gnupg", "ca-certificates"}
+		pkgs := []string{"postgresql", "postgresql-contrib", "curl", "gnupg", "ca-certificates", "lvm2", "thin-provisioning-tools"}
 		if installRedis {
 			pkgs = append(pkgs, "redis-server")
 		} else {
@@ -129,7 +129,7 @@ func installDependencies(installRedis bool) error {
 		}
 		return installIncusZabbly()
 	case "dnf":
-		pkgs := []string{"postgresql-server", "postgresql", "curl", "gnupg2"}
+		pkgs := []string{"postgresql-server", "postgresql", "curl", "gnupg2", "lvm2"}
 		if installRedis {
 			pkgs = append(pkgs, "redis")
 		} else {
@@ -358,10 +358,38 @@ func ensureHostIDMaps() error {
 }
 
 func ensureIncusNetworkAndPool() error {
-	if err := run("incus", "storage", "show", "default"); err != nil {
-		if err := run("incus", "storage", "create", "default", "dir"); err != nil {
-			return fmt.Errorf("create storage pool default: %w", err)
+	// Prefer a quota-capable pool so guests see their disk size in df (not the host disk).
+	if err := run("incus", "storage", "show", "goincus"); err != nil {
+		created := false
+		for _, args := range [][]string{
+			{"storage", "create", "goincus", "zfs", "size=200GiB"},
+			{"storage", "create", "goincus", "lvm", "size=200GiB"},
+			{"storage", "create", "goincus", "btrfs", "size=200GiB"},
+		} {
+			if err := run("incus", args...); err == nil {
+				created = true
+				fmt.Printf("    Created Incus storage pool goincus (%s)\n", args[3])
+				break
+			}
 		}
+		if !created {
+			if err := run("incus", "storage", "create", "goincus", "dir"); err != nil {
+				// Fall back to default dir pool if goincus cannot be created.
+				if err := run("incus", "storage", "show", "default"); err != nil {
+					if err := run("incus", "storage", "create", "default", "dir"); err != nil {
+						return fmt.Errorf("create storage pool: %w", err)
+					}
+				}
+				fmt.Println("    Warning: using dir storage — df inside guests shows host disk size")
+			} else {
+				fmt.Println("    Created Incus storage pool goincus (dir — limited isolation)")
+			}
+		}
+	}
+
+	pool := "goincus"
+	if err := run("incus", "storage", "show", "goincus"); err != nil {
+		pool = "default"
 	}
 
 	if err := run("incus", "network", "show", "incusbr0"); err != nil {
@@ -372,6 +400,7 @@ func ensureIncusNetworkAndPool() error {
 				if len(parts) >= 2 && parts[1] == "bridge" && parts[0] != "" {
 					fmt.Printf("    Using existing Incus network %q\n", parts[0])
 					_ = run("incus", "profile", "device", "set", "default", "eth0", "network="+parts[0])
+					_ = run("incus", "profile", "device", "add", "default", "root", "disk", "path=/", "pool="+pool)
 					return nil
 				}
 			}
@@ -383,7 +412,8 @@ func ensureIncusNetworkAndPool() error {
 
 	_ = run("incus", "profile", "device", "add", "default", "eth0", "nic", "network=incusbr0", "name=eth0")
 	_ = run("incus", "profile", "device", "set", "default", "eth0", "network=incusbr0")
-	_ = run("incus", "profile", "device", "add", "default", "root", "disk", "path=/", "pool=default")
+	_ = run("incus", "profile", "device", "add", "default", "root", "disk", "path=/", "pool="+pool)
+	_ = run("incus", "profile", "device", "set", "default", "root", "pool="+pool)
 	return nil
 }
 

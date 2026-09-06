@@ -102,30 +102,6 @@ func (c *Client) alignDefaultProfileNetwork(network string) error {
 	return c.server.UpdateProfile("default", profile.Writable(), etag)
 }
 
-// EnsureStoragePool creates the configured storage pool when absent.
-func (c *Client) EnsureStoragePool() error {
-	name := c.cfg.StoragePool
-	if name == "" {
-		name = "default"
-		c.cfg.StoragePool = name
-	}
-	if _, _, err := c.server.GetStoragePool(name); err == nil {
-		return nil
-	}
-
-	req := api.StoragePoolsPost{
-		Name:   name,
-		Driver: "dir",
-		StoragePoolPut: api.StoragePoolPut{
-			Description: "goincus default storage pool",
-		},
-	}
-	if err := c.server.CreateStoragePool(req); err != nil {
-		return fmt.Errorf("create storage pool %q: %w", name, err)
-	}
-	return nil
-}
-
 // EnsureNetwork returns a usable managed network name, creating one if needed.
 func (c *Client) EnsureNetwork() (string, error) {
 	wanted := c.cfg.Network
@@ -273,12 +249,7 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 			Profiles: profiles,
 			Config:   cfg,
 			Devices: map[string]map[string]string{
-				"root": {
-					"type": "disk",
-					"pool": c.cfg.StoragePool,
-					"path": "/",
-					"size": fmt.Sprintf("%dGiB", args.StorageGB),
-				},
+				"root": c.RootDiskDevice(args.StorageGB),
 				"eth0": eth0,
 			},
 		},
@@ -557,6 +528,7 @@ func (c *Client) UpdateStorageQuota(name string, storageGB int) error {
 		}
 	}
 	root["size"] = fmt.Sprintf("%dGiB", storageGB)
+	root["pool"] = c.cfg.StoragePool
 	inst.Devices["root"] = root
 
 	op, err := c.server.UpdateInstance(name, inst.Writable(), etag)

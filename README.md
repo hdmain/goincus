@@ -58,6 +58,8 @@ sudo systemctl enable --now goincus
 
 Package upgrades do **not** overwrite `/etc/goincus/config.yaml` (template lives at `/usr/share/goincus/config.yaml.example`).
 
+Disk size (`storage_gb`) is enforced on the `goincus` storage pool (ZFS/LVM preferred). With the old `dir` pool, `df` inside the guest shows the **host** disk — recreate instances after upgrading so they land on the quota-capable pool.
+
 ## SSH access
 
 New instances get OpenSSH installed automatically and a generated `root_password`

@@ -31,7 +31,7 @@ redis:
 incus:
   socket_path: ""
   project: "default"
-  storage_pool: "default"
+  storage_pool: "goincus"
   network: "incusbr0"
   image_server: "https://images.linuxcontainers.org"
   image_protocol: "simplestreams"
