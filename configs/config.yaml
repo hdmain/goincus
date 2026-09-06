@@ -42,10 +42,9 @@ incus:
 ports:
   host_range_start: 20000
   host_range_end: 29999
-  default_internal_ports:
-    - 22
-    - 80
-    - 443
+  # Each VPS gets this many contiguous ports, mapped 1:1 (public:N ↔ guest:N).
+  # SSH listens on the first port of the block (e.g. 20000 for 20000-20019).
+  ports_per_instance: 20
 
 defaults:
   cpu_cores: 1

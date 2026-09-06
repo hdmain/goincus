@@ -56,7 +56,8 @@ type CreateInstanceRequest struct {
 	MemoryMB  int    `json:"memory_mb,omitempty"`
 	StorageGB int    `json:"storage_gb,omitempty"`
 	Processes int    `json:"processes,omitempty"`
-	// InternalPorts overrides default port forwards (e.g. [22, 80]).
+	// InternalPorts is deprecated and ignored. Each VPS gets ports_per_instance
+	// contiguous ports mapped 1:1 (host:N → guest:N); sshd listens on the first.
 	InternalPorts []int `json:"internal_ports,omitempty"`
 }
 

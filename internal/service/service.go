@@ -121,16 +121,6 @@ func (s *Service) CreateInstance(ctx context.Context, req models.CreateInstanceR
 		image = s.cfg.Incus.DefaultImage
 	}
 
-	internalPorts := req.InternalPorts
-	if len(internalPorts) == 0 {
-		internalPorts = append([]int(nil), s.cfg.Ports.DefaultInternalPorts...)
-	}
-	for _, p := range internalPorts {
-		if p <= 0 || p > 65535 {
-			return nil, fmt.Errorf("%w: invalid internal port %d", ErrInvalidInput, p)
-		}
-	}
-
 	now := time.Now().UTC()
 	id := uuid.New()
 	incusName := fmt.Sprintf("goincus-%s", id.String()[:8])
@@ -162,14 +152,42 @@ func (s *Service) CreateInstance(ctx context.Context, req models.CreateInstanceR
 
 	_ = s.redis.SetInstanceState(ctx, id.String(), string(models.StatusCreating), 30*time.Minute)
 
-	go s.provision(context.Background(), inst, internalPorts)
+	go s.provision(context.Background(), inst)
 
 	inst.Status = models.StatusCreating
 	return inst, nil
 }
 
-func (s *Service) provision(ctx context.Context, inst *models.Instance, internalPorts []int) {
+func (s *Service) provision(ctx context.Context, inst *models.Instance) {
 	_ = s.store.UpdateInstanceStatus(ctx, inst.ID, models.StatusCreating, "")
+
+	blockSize := s.cfg.Ports.PortsPerInstance
+	if blockSize <= 0 {
+		blockSize = 20
+	}
+
+	block, err := s.ports.AllocateBlock(ctx, blockSize)
+	if err != nil {
+		s.fail(ctx, inst.ID, fmt.Errorf("allocate port block: %w", err))
+		return
+	}
+	sshPort := block[0]
+	releaseUnused := func() {
+		existing, listErr := s.store.ListPorts(ctx, inst.ID)
+		if listErr != nil {
+			s.ports.ReleaseBlock(ctx, block)
+			return
+		}
+		have := make(map[int]struct{}, len(existing))
+		for _, p := range existing {
+			have[p.HostPort] = struct{}{}
+		}
+		for _, p := range block {
+			if _, ok := have[p]; !ok {
+				_ = s.ports.Release(ctx, p)
+			}
+		}
+	}
 
 	if err := s.incus.CreateContainer(incusclient.CreateArgs{
 		Name:         inst.IncusName,
@@ -180,17 +198,21 @@ func (s *Service) provision(ctx context.Context, inst *models.Instance, internal
 		Processes:    inst.Processes,
 		Profiles:     s.cfg.Incus.Profiles,
 		RootPassword: inst.RootPassword,
+		SSHPort:      sshPort,
 	}); err != nil {
+		s.ports.ReleaseBlock(ctx, block)
 		s.fail(ctx, inst.ID, fmt.Errorf("create container: %w", err))
 		return
 	}
 
 	if err := s.incus.EnsureStarted(inst.IncusName); err != nil {
+		releaseUnused()
 		s.fail(ctx, inst.ID, fmt.Errorf("start container: %w", err))
 		return
 	}
 
 	if _, err := s.incus.EnsureInstanceIPv4(inst.IncusName); err != nil {
+		releaseUnused()
 		s.fail(ctx, inst.ID, fmt.Errorf("assign ipv4: %w", err))
 		return
 	}
@@ -198,12 +220,14 @@ func (s *Service) provision(ctx context.Context, inst *models.Instance, internal
 	// Give the guest a moment to boot before apt/ssh setup.
 	time.Sleep(5 * time.Second)
 
-	if err := s.bootstrapSSH(ctx, inst); err != nil {
+	if err := s.bootstrapSSH(ctx, inst, sshPort); err != nil {
+		releaseUnused()
 		s.fail(ctx, inst.ID, err)
 		return
 	}
 
-	if err := s.ensureDefaultPorts(ctx, inst, internalPorts); err != nil {
+	if err := s.attachPortBlock(ctx, inst, block); err != nil {
+		releaseUnused()
 		s.fail(ctx, inst.ID, err)
 		return
 	}
@@ -212,10 +236,10 @@ func (s *Service) provision(ctx context.Context, inst *models.Instance, internal
 		s.logger.Error("update status running", "id", inst.ID, "err", err)
 	}
 	_ = s.redis.SetInstanceState(ctx, inst.ID.String(), string(models.StatusRunning), 24*time.Hour)
-	s.logger.Info("instance provisioned", "id", inst.ID, "incus", inst.IncusName)
+	s.logger.Info("instance provisioned", "id", inst.ID, "incus", inst.IncusName, "ports", fmt.Sprintf("%d-%d", block[0], block[len(block)-1]))
 }
 
-func (s *Service) bootstrapSSH(ctx context.Context, inst *models.Instance) error {
+func (s *Service) bootstrapSSH(ctx context.Context, inst *models.Instance, sshPort int) error {
 	pass := inst.RootPassword
 	if pass == "" {
 		generated, err := secrets.RandomPassword(18)
@@ -235,53 +259,126 @@ func (s *Service) bootstrapSSH(ctx context.Context, inst *models.Instance) error
 		return fmt.Errorf("assign ipv4: %w", err)
 	}
 	_ = s.incus.ConfigureGuestDNS(inst.IncusName)
-	if err := s.incus.EnsureSSH(inst.IncusName, pass); err != nil {
+	if err := s.incus.EnsureSSH(inst.IncusName, pass, sshPort); err != nil {
 		return fmt.Errorf("bootstrap ssh: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) ensureDefaultPorts(ctx context.Context, inst *models.Instance, internalPorts []int) error {
+// attachPortBlock creates 1:1 proxies host:P → guest:P for every port in the block.
+func (s *Service) attachPortBlock(ctx context.Context, inst *models.Instance, block []int) error {
 	existing, err := s.store.ListPorts(ctx, inst.ID)
 	if err != nil {
 		return fmt.Errorf("list ports: %w", err)
 	}
 	have := map[int]struct{}{}
 	for _, p := range existing {
-		have[p.InternalPort] = struct{}{}
+		have[p.HostPort] = struct{}{}
 	}
 
-	for _, internal := range internalPorts {
-		if _, ok := have[internal]; ok {
+	for _, port := range block {
+		if _, ok := have[port]; ok {
 			continue
 		}
-		hostPort, err := s.ports.Allocate(ctx)
-		if err != nil {
-			return fmt.Errorf("allocate port for %d: %w", internal, err)
-		}
-
-		device := fmt.Sprintf("proxy-%d", internal)
-		if err := s.incus.AddProxyDevice(inst.IncusName, device, "tcp", hostPort, internal); err != nil {
-			_ = s.ports.Release(ctx, hostPort)
+		device := fmt.Sprintf("proxy-%d", port)
+		if err := s.incus.AddProxyDevice(inst.IncusName, device, "tcp", port, port); err != nil {
 			return fmt.Errorf("proxy device %s: %w", device, err)
 		}
-
 		pm := models.PortMapping{
 			ID:           uuid.New(),
 			InstanceID:   inst.ID,
 			Protocol:     "tcp",
-			HostPort:     hostPort,
-			InternalPort: internal,
+			HostPort:     port,
+			InternalPort: port,
 			DeviceName:   device,
 			CreatedAt:    time.Now().UTC(),
 		}
 		if err := s.store.AddPort(ctx, &pm); err != nil {
 			_ = s.incus.RemoveProxyDevice(inst.IncusName, device)
-			_ = s.ports.Release(ctx, hostPort)
 			return fmt.Errorf("persist port: %w", err)
 		}
 	}
 	return nil
+}
+
+// instanceSSHPort returns the first port of an existing 1:1 block, or 0 if unknown.
+func instanceSSHPort(ports []models.PortMapping) int {
+	if len(ports) == 0 {
+		return 0
+	}
+	min := ports[0].HostPort
+	for _, p := range ports[1:] {
+		if p.HostPort < min {
+			min = p.HostPort
+		}
+	}
+	return min
+}
+
+// ensurePortBlock makes sure the instance has a full contiguous 1:1 port block.
+func (s *Service) ensurePortBlock(ctx context.Context, inst *models.Instance) (sshPort int, err error) {
+	blockSize := s.cfg.Ports.PortsPerInstance
+	if blockSize <= 0 {
+		blockSize = 20
+	}
+
+	existing, err := s.store.ListPorts(ctx, inst.ID)
+	if err != nil {
+		return 0, fmt.Errorf("list ports: %w", err)
+	}
+	inst.Ports = existing
+
+	if len(existing) == 0 {
+		block, err := s.ports.AllocateBlock(ctx, blockSize)
+		if err != nil {
+			return 0, err
+		}
+		if err := s.attachPortBlock(ctx, inst, block); err != nil {
+			s.ports.ReleaseBlock(ctx, block)
+			return 0, err
+		}
+		return block[0], nil
+	}
+
+	sshPort = instanceSSHPort(existing)
+	// Fill missing ports in [sshPort, sshPort+blockSize) when they look like a 1:1 block.
+	need := make([]int, 0, blockSize)
+	have := map[int]struct{}{}
+	for _, p := range existing {
+		have[p.HostPort] = struct{}{}
+	}
+	for p := sshPort; p < sshPort+blockSize; p++ {
+		if _, ok := have[p]; !ok {
+			need = append(need, p)
+		}
+	}
+	for _, port := range need {
+		if err := s.ports.Reserve(ctx, port); err != nil {
+			// Outside range or taken — skip; keep existing mapping.
+			s.logger.Warn("cannot reserve fill port", "port", port, "err", err)
+			continue
+		}
+		device := fmt.Sprintf("proxy-%d", port)
+		if err := s.incus.AddProxyDevice(inst.IncusName, device, "tcp", port, port); err != nil {
+			_ = s.ports.Release(ctx, port)
+			return sshPort, fmt.Errorf("proxy device %s: %w", device, err)
+		}
+		pm := models.PortMapping{
+			ID:           uuid.New(),
+			InstanceID:   inst.ID,
+			Protocol:     "tcp",
+			HostPort:     port,
+			InternalPort: port,
+			DeviceName:   device,
+			CreatedAt:    time.Now().UTC(),
+		}
+		if err := s.store.AddPort(ctx, &pm); err != nil {
+			_ = s.incus.RemoveProxyDevice(inst.IncusName, device)
+			_ = s.ports.Release(ctx, port)
+			return sshPort, err
+		}
+	}
+	return sshPort, nil
 }
 
 func (s *Service) fail(ctx context.Context, id uuid.UUID, cause error) {
@@ -368,10 +465,14 @@ func (s *Service) StartInstance(ctx context.Context, id uuid.UUID) (*models.Inst
 	if err := s.incus.EnsureStarted(inst.IncusName); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}
-	if err := s.bootstrapSSH(ctx, inst); err != nil {
+	sshPort, err := s.ensurePortBlock(ctx, inst)
+	if err != nil {
 		return nil, err
 	}
-	if err := s.ensureDefaultPorts(ctx, inst, s.cfg.Ports.DefaultInternalPorts); err != nil {
+	if sshPort == 0 {
+		sshPort = 22
+	}
+	if err := s.bootstrapSSH(ctx, inst, sshPort); err != nil {
 		return nil, err
 	}
 	_ = s.store.UpdateInstanceStatus(ctx, id, models.StatusRunning, "")
@@ -456,9 +557,14 @@ func (s *Service) AddPortMapping(ctx context.Context, id uuid.UUID, req models.A
 
 	hostPort := req.HostPort
 	if hostPort == 0 {
-		hostPort, err = s.ports.Allocate(ctx)
-		if err != nil {
-			return nil, err
+		// Prefer 1:1 mapping (public:N ↔ guest:N) when the guest port is free on the host.
+		if err := s.ports.Reserve(ctx, req.InternalPort); err == nil {
+			hostPort = req.InternalPort
+		} else {
+			hostPort, err = s.ports.Allocate(ctx)
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		if err := s.ports.Reserve(ctx, hostPort); err != nil {

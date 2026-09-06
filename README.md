@@ -75,12 +75,15 @@ Residual risk: all containers share the host kernel — a kernel 0-day can still
 
 ## SSH access
 
-New instances get OpenSSH installed automatically and a generated `root_password`
-(returned by **create / get / repair** — not by list). Map host port for container 22, then:
+Each VPS gets a contiguous block of host ports (default **20**, e.g. `20000–20019`),
+mapped **1:1** into the guest (`publicIP:N` → container `:N`). OpenSSH listens on the
+**first** port of that block (not 22).
+
+`root_password` is returned by **create / get / repair** — not by list.
 
 ```bash
-ssh root@HOST -p HOST_PORT
-# password from JSON field root_password
+# ports[0].host_port is the SSH port (and guest listen port)
+ssh root@HOST -p SSH_PORT
 ```
 
 All endpoints except `/healthz` and `/api/v1/health` require:

@@ -41,44 +41,87 @@ func (a *Allocator) Sync(ctx context.Context) error {
 
 // Allocate finds and reserves a free host port.
 func (a *Allocator) Allocate(ctx context.Context) (int, error) {
+	ports, err := a.AllocateBlock(ctx, 1)
+	if err != nil {
+		return 0, err
+	}
+	return ports[0], nil
+}
+
+// AllocateBlock finds and reserves a contiguous free block of host ports (1:1 with guest).
+// Returns the starting port; the block is [start, start+size).
+func (a *Allocator) AllocateBlock(ctx context.Context, size int) ([]int, error) {
+	if size < 1 {
+		return nil, fmt.Errorf("block size must be >= 1")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	ok, err := a.redis.AcquireLock(ctx, "port-alloc", allocLockTTL)
 	if err != nil {
-		return 0, fmt.Errorf("acquire port lock: %w", err)
+		return nil, fmt.Errorf("acquire port lock: %w", err)
 	}
 	if !ok {
-		return 0, fmt.Errorf("port allocator busy")
+		return nil, fmt.Errorf("port allocator busy")
 	}
 	defer func() { _ = a.redis.ReleaseLock(ctx, "port-alloc") }()
 
 	usedDB, err := a.store.ListUsedHostPorts(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	used := make(map[int]struct{}, len(usedDB))
 	for _, p := range usedDB {
 		used[p] = struct{}{}
 	}
 
-	for port := a.cfg.HostRangeStart; port <= a.cfg.HostRangeEnd; port++ {
+	isFree := func(port int) (bool, error) {
 		if _, taken := used[port]; taken {
-			continue
+			return false, nil
 		}
 		allocated, err := a.redis.IsPortAllocated(ctx, port)
 		if err != nil {
-			return 0, err
+			return false, err
 		}
-		if allocated {
+		return !allocated, nil
+	}
+
+	lastStart := a.cfg.HostRangeEnd - size + 1
+	for start := a.cfg.HostRangeStart; start <= lastStart; start++ {
+		okBlock := true
+		for p := start; p < start+size; p++ {
+			free, err := isFree(p)
+			if err != nil {
+				return nil, err
+			}
+			if !free {
+				okBlock = false
+				break
+			}
+		}
+		if !okBlock {
 			continue
 		}
-		if err := a.redis.MarkPortAllocated(ctx, port); err != nil {
-			return 0, err
+		block := make([]int, 0, size)
+		for p := start; p < start+size; p++ {
+			if err := a.redis.MarkPortAllocated(ctx, p); err != nil {
+				for _, marked := range block {
+					_ = a.redis.ReleasePort(ctx, marked)
+				}
+				return nil, err
+			}
+			block = append(block, p)
 		}
-		return port, nil
+		return block, nil
 	}
-	return 0, fmt.Errorf("no free host ports in range %d-%d", a.cfg.HostRangeStart, a.cfg.HostRangeEnd)
+	return nil, fmt.Errorf("no free contiguous %d-port block in range %d-%d", size, a.cfg.HostRangeStart, a.cfg.HostRangeEnd)
+}
+
+// ReleaseBlock frees multiple host ports in Redis.
+func (a *Allocator) ReleaseBlock(ctx context.Context, ports []int) {
+	for _, p := range ports {
+		_ = a.redis.ReleasePort(ctx, p)
+	}
 }
 
 // Reserve marks a specific host port as allocated if available.

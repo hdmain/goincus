@@ -70,7 +70,8 @@ type IncusConfig struct {
 type PortsConfig struct {
 	HostRangeStart       int   `yaml:"host_range_start"`
 	HostRangeEnd         int   `yaml:"host_range_end"`
-	DefaultInternalPorts []int `yaml:"default_internal_ports"`
+	PortsPerInstance     int   `yaml:"ports_per_instance"`
+	DefaultInternalPorts []int `yaml:"default_internal_ports"` // deprecated; ignored when ports_per_instance > 0
 }
 
 type DefaultsConfig struct {
@@ -173,9 +174,9 @@ func Default() *Config {
 			Profiles:      []string{"goincus-unprivileged"},
 		},
 		Ports: PortsConfig{
-			HostRangeStart:       20000,
-			HostRangeEnd:         29999,
-			DefaultInternalPorts: []int{22, 80, 443},
+			HostRangeStart:   20000,
+			HostRangeEnd:     29999,
+			PortsPerInstance: 20,
 		},
 		Defaults: DefaultsConfig{
 			CPUCores:  1,
@@ -226,6 +227,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Ports.HostRangeStart >= c.Ports.HostRangeEnd {
 		return fmt.Errorf("invalid host port range: %d-%d", c.Ports.HostRangeStart, c.Ports.HostRangeEnd)
+	}
+	if c.Ports.PortsPerInstance <= 0 {
+		c.Ports.PortsPerInstance = 20
+	}
+	if c.Ports.PortsPerInstance > (c.Ports.HostRangeEnd - c.Ports.HostRangeStart + 1) {
+		return fmt.Errorf("ports_per_instance %d exceeds host port range", c.Ports.PortsPerInstance)
 	}
 	if c.Defaults.CPUCores < 1 {
 		return fmt.Errorf("defaults.cpu_cores must be >= 1")

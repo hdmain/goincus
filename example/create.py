@@ -28,7 +28,6 @@ def main() -> None:
         "cpu_cores": 1,
         "memory_mb": 512,
         "storage_gb": 10,
-        "internal_ports": [22, 80],
     }
     inst = client.request("POST", "/api/v1/instances", body)
     pretty(inst)

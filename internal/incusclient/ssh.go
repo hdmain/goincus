@@ -12,7 +12,11 @@ import (
 )
 
 // CloudInitUserData builds cloud-config that installs OpenSSH and sets the root password.
-func CloudInitUserData(rootPassword string) string {
+// sshPort is the guest listen port (usually the first port of the instance's 1:1 block).
+func CloudInitUserData(rootPassword string, sshPort int) string {
+	if sshPort <= 0 {
+		sshPort = 22
+	}
 	b64 := base64.StdEncoding.EncodeToString([]byte(rootPassword))
 	return fmt.Sprintf(`#cloud-config
 package_update: true
@@ -26,16 +30,19 @@ resolv_conf:
 runcmd:
   - [ bash, -lc, "PASS=$(echo '%s' | base64 -d); echo root:$PASS | chpasswd; unset PASS" ]
   - [ bash, -lc, "ssh-keygen -A" ]
-  - [ bash, -lc, "mkdir -p /etc/ssh/sshd_config.d; printf '%%s\\n' 'PermitRootLogin yes' 'PasswordAuthentication yes' 'AddressFamily inet' 'ListenAddress 0.0.0.0' 'ListenAddress 127.0.0.1' 'MaxAuthTries 4' 'LoginGraceTime 30' 'PermitEmptyPasswords no' 'X11Forwarding no' > /etc/ssh/sshd_config.d/99-goincus.conf" ]
+  - [ bash, -lc, "mkdir -p /etc/ssh/sshd_config.d; printf '%%s\\n' 'Port %d' 'PermitRootLogin yes' 'PasswordAuthentication yes' 'AddressFamily inet' 'ListenAddress 0.0.0.0' 'ListenAddress 127.0.0.1' 'MaxAuthTries 4' 'LoginGraceTime 30' 'PermitEmptyPasswords no' 'X11Forwarding no' > /etc/ssh/sshd_config.d/99-goincus.conf" ]
   - [ bash, -lc, "systemctl disable --now ssh.socket 2>/dev/null || true; systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true; systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true" ]
-`, b64)
+`, b64, sshPort)
 }
 
 // EnsureSSH installs/configures OpenSSH inside a running container and sets the root password.
-// It prefers apt when the guest has DNS, otherwise installs .debs pushed from the host.
-func (c *Client) EnsureSSH(name, rootPassword string) error {
+// sshPort is where sshd listens inside the guest (1:1 with the public host port).
+func (c *Client) EnsureSSH(name, rootPassword string, sshPort int) error {
 	if rootPassword == "" {
 		return fmt.Errorf("root password is empty")
+	}
+	if sshPort <= 0 {
+		sshPort = 22
 	}
 
 	_ = c.ConfigureGuestDNS(name)
@@ -56,7 +63,8 @@ echo "root:${PASS}" | chpasswd
 unset PASS
 ssh-keygen -A
 mkdir -p /etc/ssh/sshd_config.d /run/sshd
-cat > /etc/ssh/sshd_config.d/99-goincus.conf <<'EOF'
+cat > /etc/ssh/sshd_config.d/99-goincus.conf <<EOF
+Port %d
 PermitRootLogin yes
 PasswordAuthentication yes
 KbdInteractiveAuthentication yes
@@ -73,6 +81,10 @@ X11Forwarding no
 AllowTcpForwarding no
 PermitEmptyPasswords no
 EOF
+# Drop default Port 22 from main config if present so only our Port applies.
+if [ -f /etc/ssh/sshd_config ]; then
+  sed -i -E 's/^[#[:space:]]*Port[[:space:]].*/# Port overridden by 99-goincus.conf/' /etc/ssh/sshd_config || true
+fi
 systemctl disable --now ssh.socket 2>/dev/null || true
 systemctl disable --now sshd.socket 2>/dev/null || true
 systemctl unmask ssh 2>/dev/null || true
@@ -81,7 +93,7 @@ systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
 systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || /usr/sbin/sshd || true
 sshd -t || /usr/sbin/sshd -t || true
 for i in $(seq 1 30); do
-  if ss -ltn | grep -E '[:.]22[[:space:]]' >/dev/null 2>&1; then
+  if ss -ltn | grep -E '[:.]%d[[:space:]]' >/dev/null 2>&1; then
     exit 0
   fi
   if [ "$i" = "5" ] || [ "$i" = "15" ]; then
@@ -89,11 +101,11 @@ for i in $(seq 1 30); do
   fi
   sleep 1
 done
-echo "sshd failed to listen on :22" >&2
+echo "sshd failed to listen on :%d" >&2
 ss -ltn || true
 systemctl status ssh --no-pager 2>/dev/null || systemctl status sshd --no-pager 2>/dev/null || true
 exit 1
-`, b64)
+`, b64, sshPort, sshPort, sshPort)
 
 	stdout, stderr, code, err := c.exec(name, script)
 	if err != nil {
@@ -102,7 +114,7 @@ exit 1
 	if code != 0 {
 		return fmt.Errorf("configure ssh exited %d", code)
 	}
-	if err := c.WaitForSSHD(name, 90*time.Second); err != nil {
+	if err := c.WaitForSSHD(name, sshPort, 90*time.Second); err != nil {
 		return err
 	}
 	_ = stdout
@@ -136,17 +148,22 @@ command -v sshd >/dev/null || test -x /usr/sbin/sshd
 	return nil
 }
 
-// WaitForSSHD polls until something listens on TCP/22 inside the container.
-func (c *Client) WaitForSSHD(name string, timeout time.Duration) error {
+// WaitForSSHD polls until something listens on the given TCP port inside the container.
+func (c *Client) WaitForSSHD(name string, sshPort int, timeout time.Duration) error {
+	if sshPort <= 0 {
+		sshPort = 22
+	}
 	deadline := time.Now().Add(timeout)
+	pattern := fmt.Sprintf(`ss -ltn | grep -E '[:.]%d[[:space:]]'`, sshPort)
+	needle := fmt.Sprintf(":%d", sshPort)
 	for time.Now().Before(deadline) {
-		stdout, _, code, err := c.exec(name, `ss -ltn | grep -E '[:.]22[[:space:]]'`)
-		if err == nil && code == 0 && strings.Contains(stdout, ":22") {
+		stdout, _, code, err := c.exec(name, pattern)
+		if err == nil && code == 0 && strings.Contains(stdout, needle) {
 			return nil
 		}
 		time.Sleep(2 * time.Second)
 	}
-	return fmt.Errorf("sshd did not become ready within %s", timeout)
+	return fmt.Errorf("sshd did not become ready on :%d within %s", sshPort, timeout)
 }
 
 func (c *Client) exec(name, script string) (stdout string, stderr string, exitCode int, err error) {

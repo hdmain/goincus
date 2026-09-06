@@ -165,6 +165,8 @@ type CreateArgs struct {
 	Processes    int
 	Profiles     []string
 	RootPassword string
+	// SSHPort is the guest sshd listen port (first port of the 1:1 block). 0 = 22.
+	SSHPort int
 }
 
 // CreateContainer provisions an unprivileged LXC container with resource limits.
@@ -186,7 +188,7 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 
 	cfg := mergeConfig(HardenedInstanceConfig(), ResourceConfig(args.CPUCores, args.MemoryMB, args.Processes))
 	if args.RootPassword != "" {
-		cfg["cloud-init.user-data"] = CloudInitUserData(args.RootPassword)
+		cfg["cloud-init.user-data"] = CloudInitUserData(args.RootPassword, args.SSHPort)
 	}
 
 	ip, err := c.AllocateContainerIPv4()
