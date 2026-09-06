@@ -242,6 +242,15 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 		cfg["cloud-init.user-data"] = CloudInitUserData(args.RootPassword)
 	}
 
+	eth0 := map[string]string{
+		"type":    "nic",
+		"network": c.cfg.Network,
+		"name":    "eth0",
+	}
+	if ip, err := c.AllocateContainerIPv4(); err == nil {
+		eth0["ipv4.address"] = ip
+	}
+
 	req := api.InstancesPost{
 		Name: args.Name,
 		Type: api.InstanceTypeContainer,
@@ -261,11 +270,7 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 					"path": "/",
 					"size": fmt.Sprintf("%dGiB", args.StorageGB),
 				},
-				"eth0": {
-					"type":    "nic",
-					"network": c.cfg.Network,
-					"name":    "eth0",
-				},
+				"eth0": eth0,
 			},
 		},
 	}

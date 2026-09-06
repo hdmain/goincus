@@ -226,7 +226,6 @@ func (s *Service) bootstrapSSH(ctx context.Context, inst *models.Instance) error
 	if err := s.incus.EnsureSSH(inst.IncusName, pass); err != nil {
 		return fmt.Errorf("bootstrap ssh: %w", err)
 	}
-	_ = s.incus.WaitForSSHD(inst.IncusName, 45*time.Second)
 	return nil
 }
 
