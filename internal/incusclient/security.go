@@ -101,7 +101,36 @@ func EnsureHostIsolation() error {
 	if err := ensureLargeIDMap(); err != nil {
 		return err
 	}
+	_ = ensureBridgeNetfilter()
 	_ = applyHostSysctlHardening()
+	return nil
+}
+
+// ensureBridgeNetfilter loads br_netfilter so Incus NIC ipv4/ipv6 filtering can start.
+func ensureBridgeNetfilter() error {
+	_ = os.MkdirAll("/etc/modules-load.d", 0o755)
+	_ = os.WriteFile("/etc/modules-load.d/goincus-br-netfilter.conf", []byte("br_netfilter\n"), 0o644)
+
+	if out, err := exec.Command("modprobe", "br_netfilter").CombinedOutput(); err != nil {
+		return fmt.Errorf("modprobe br_netfilter: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	// Required for iptables/nft on bridge ports (MAC/IP filtering).
+	for _, kv := range []struct{ key, val string }{
+		{"net.bridge.bridge-nf-call-iptables", "1"},
+		{"net.bridge.bridge-nf-call-ip6tables", "1"},
+		{"net.bridge.bridge-nf-call-arptables", "1"},
+	} {
+		_ = exec.Command("sysctl", "-w", kv.key+"="+kv.val).Run()
+	}
+
+	sysctl := `# Managed by goincus — required for Incus security.ipv4/ipv6_filtering
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-arptables = 1
+`
+	_ = os.MkdirAll("/etc/sysctl.d", 0o755)
+	_ = os.WriteFile("/etc/sysctl.d/99-goincus-br-netfilter.conf", []byte(sysctl), 0o644)
 	return nil
 }
 

@@ -4,9 +4,23 @@ set -eu
 BR="${GOINCUS_BRIDGE:-incusbr0}"
 SUBNET="${GOINCUS_SUBNET:-10.72.160.0/24}"
 
+# Incus security.ipv4/ipv6_filtering needs bridge netfilter.
+mkdir -p /etc/modules-load.d
+printf 'br_netfilter\n' > /etc/modules-load.d/goincus-br-netfilter.conf
+modprobe br_netfilter 2>/dev/null || true
+
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
+sysctl -w net.bridge.bridge-nf-call-iptables=1 >/dev/null 2>&1 || true
+sysctl -w net.bridge.bridge-nf-call-ip6tables=1 >/dev/null 2>&1 || true
+sysctl -w net.bridge.bridge-nf-call-arptables=1 >/dev/null 2>&1 || true
+
 mkdir -p /etc/sysctl.d
 printf 'net.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-goincus-forward.conf
+printf '%s\n' \
+  'net.bridge.bridge-nf-call-iptables = 1' \
+  'net.bridge.bridge-nf-call-ip6tables = 1' \
+  'net.bridge.bridge-nf-call-arptables = 1' \
+  > /etc/sysctl.d/99-goincus-br-netfilter.conf
 
 IPT="$(command -v iptables-nft 2>/dev/null || command -v iptables || true)"
 [ -n "$IPT" ] || exit 0

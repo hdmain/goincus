@@ -379,7 +379,16 @@ func (c *Client) EnsureStarted(name string) error {
 		if c.IsRunning(name) {
 			return nil
 		}
-		return err
+		msg := err.Error()
+		if strings.Contains(msg, "br_netfilter") || strings.Contains(msg, "bridge netfilter") {
+			_ = ensureBridgeNetfilter()
+			if retry := c.StartContainer(name); retry == nil || c.IsRunning(name) {
+				return nil
+			} else {
+				return IsolationError(fmt.Errorf("%w (loaded br_netfilter and retried: %v)", err, retry))
+			}
+		}
+		return IsolationError(err)
 	}
 	return nil
 }
