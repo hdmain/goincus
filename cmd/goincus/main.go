@@ -84,12 +84,24 @@ func runInit(args []string) int {
 	fmt.Println("---------------------")
 	fmt.Printf("Config:        %s\n", result.ConfigPath)
 	fmt.Printf("Database port: 127.0.0.1:9601\n")
-	fmt.Printf("Redis port:    127.0.0.1:9602\n")
+	redisNote := ""
+	if result.RedisReused {
+		redisNote = " (existing, reused)"
+	}
+	fmt.Printf("Redis:         %s:%d%s\n", result.RedisHost, result.RedisPort, redisNote)
 	fmt.Printf("API listen:    0.0.0.0:9603\n")
 	fmt.Println()
 	fmt.Println("Generated secrets (store securely — shown once):")
 	fmt.Printf("  database.password = %s\n", result.DBPassword)
-	fmt.Printf("  redis.password    = %s\n", result.RedisPass)
+	if result.RedisReused {
+		if result.RedisPass == "" {
+			fmt.Printf("  redis.password    = (none — existing Redis has no requirepass)\n")
+		} else {
+			fmt.Printf("  redis.password    = %s (from existing Redis)\n", result.RedisPass)
+		}
+	} else {
+		fmt.Printf("  redis.password    = %s\n", result.RedisPass)
+	}
 	for i, key := range result.APIKeys {
 		fmt.Printf("  auth.api_keys[%d]  = %s\n", i, key)
 	}

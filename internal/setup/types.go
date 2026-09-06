@@ -16,8 +16,11 @@ type Options struct {
 
 // Result is printed after a successful init.
 type Result struct {
-	ConfigPath string
-	APIKeys    []string
-	DBPassword string
-	RedisPass  string
+	ConfigPath  string
+	APIKeys     []string
+	DBPassword  string
+	RedisPass   string
+	RedisHost   string
+	RedisPort   int
+	RedisReused bool
 }

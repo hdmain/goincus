@@ -35,14 +35,34 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 
+	existingRedis, redisReused := detectExistingRedis()
+	if redisReused {
+		applyExistingRedis(cfg, existingRedis)
+		fmt.Printf("==> Existing Redis detected at %s:%d (%s) — reusing it\n",
+			existingRedis.Host, existingRedis.Port, existingRedis.Source)
+	}
+
 	if !opts.SkipInstall {
-		fmt.Println("==> Installing PostgreSQL, Redis, and Incus (required)...")
-		if err := installDependencies(); err != nil {
+		fmt.Println("==> Installing required dependencies (PostgreSQL, Redis if missing, Incus)...")
+		if err := installDependencies(!redisReused && !redisBinaryPresent()); err != nil {
 			return nil, fmt.Errorf("dependency install failed: %w", err)
+		}
+		// Re-detect after install in case Redis was just installed but already configured elsewhere.
+		if !redisReused {
+			if ep, ok := detectExistingRedis(); ok {
+				applyExistingRedis(cfg, ep)
+				existingRedis = ep
+				redisReused = true
+				fmt.Printf("==> Redis became available at %s:%d — reusing it\n", ep.Host, ep.Port)
+			}
 		}
 	} else {
 		fmt.Println("==> Skipping package install (--skip-install); verifying binaries...")
-		for _, bin := range []string{"psql", "redis-server", "incus"} {
+		need := []string{"psql", "incus"}
+		if !redisReused {
+			need = append(need, "redis-server")
+		}
+		for _, bin := range need {
 			if _, err := exec.LookPath(bin); err != nil {
 				return nil, fmt.Errorf("%s not found in PATH; install it or omit --skip-install", bin)
 			}
@@ -54,9 +74,16 @@ func Run(opts Options) (*Result, error) {
 		return nil, fmt.Errorf("configure postgresql: %w", err)
 	}
 
-	fmt.Println("==> Configuring Redis on 127.0.0.1:9602...")
-	if err := configureRedis(cfg); err != nil {
-		return nil, fmt.Errorf("configure redis: %w", err)
+	if redisReused {
+		fmt.Printf("==> Keeping existing Redis at %s (no port/password changes)\n", formatRedisAddr(cfg))
+		if existingRedis != nil && existingRedis.Source == "running-needs-auth" && cfg.Redis.Password == "" {
+			fmt.Println("    Warning: Redis requires AUTH but requirepass was not found in config; set redis.password in the config manually")
+		}
+	} else {
+		fmt.Println("==> Configuring new Redis on 127.0.0.1:9602...")
+		if err := configureRedis(cfg); err != nil {
+			return nil, fmt.Errorf("configure redis: %w", err)
+		}
 	}
 
 	fmt.Println("==> Initializing Incus...")
@@ -73,27 +100,43 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	return &Result{
-		ConfigPath: cfgPath,
-		APIKeys:    append([]string(nil), cfg.Auth.APIKeys...),
-		DBPassword: cfg.Database.Password,
-		RedisPass:  cfg.Redis.Password,
+		ConfigPath:  cfgPath,
+		APIKeys:     append([]string(nil), cfg.Auth.APIKeys...),
+		DBPassword:  cfg.Database.Password,
+		RedisPass:   cfg.Redis.Password,
+		RedisHost:   cfg.Redis.Host,
+		RedisPort:   cfg.Redis.Port,
+		RedisReused: redisReused,
 	}, nil
 }
 
-func installDependencies() error {
+func installDependencies(installRedis bool) error {
 	pm := detectPackageManager()
 	switch pm {
 	case "apt":
 		if err := runEnv(map[string]string{"DEBIAN_FRONTEND": "noninteractive"}, "apt-get", "update", "-y"); err != nil {
 			return err
 		}
-		if err := runEnv(map[string]string{"DEBIAN_FRONTEND": "noninteractive"},
-			"apt-get", "install", "-y", "postgresql", "postgresql-contrib", "redis-server", "curl", "gnupg", "ca-certificates"); err != nil {
+		pkgs := []string{"postgresql", "postgresql-contrib", "curl", "gnupg", "ca-certificates"}
+		if installRedis {
+			pkgs = append(pkgs, "redis-server")
+		} else {
+			fmt.Println("    Skipping Redis package install (existing Redis will be used)")
+		}
+		args := append([]string{"install", "-y"}, pkgs...)
+		if err := runEnv(map[string]string{"DEBIAN_FRONTEND": "noninteractive"}, "apt-get", args...); err != nil {
 			return err
 		}
 		return installIncusZabbly()
 	case "dnf":
-		if err := run("dnf", "install", "-y", "postgresql-server", "postgresql", "redis", "curl", "gnupg2"); err != nil {
+		pkgs := []string{"postgresql-server", "postgresql", "curl", "gnupg2"}
+		if installRedis {
+			pkgs = append(pkgs, "redis")
+		} else {
+			fmt.Println("    Skipping Redis package install (existing Redis will be used)")
+		}
+		args := append([]string{"install", "-y"}, pkgs...)
+		if err := run("dnf", args...); err != nil {
 			return err
 		}
 		_ = run("postgresql-setup", "--initdb")

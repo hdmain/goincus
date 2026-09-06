@@ -25,10 +25,11 @@ sudo systemctl enable --now goincus
 
 `goincus init` will:
 
-1. Install **PostgreSQL**, **Redis**, and **Incus** (required)
-2. Bind them to the ports above and create the `goincus` database role
-3. Write `/etc/goincus/config.yaml` with generated DB/Redis passwords and API keys
-4. Install the systemd unit and SQL migrations
+1. Install **PostgreSQL**, **Redis** (only if none exists), and **Incus**
+2. If Redis is already running or configured locally, **reuse it on its current port** (any port)
+3. Bind PostgreSQL to `127.0.0.1:9601` and create the `goincus` database role
+4. Write `/etc/goincus/config.yaml` with generated DB password and API keys (Redis password taken from the existing instance when reused)
+5. Install the systemd unit and SQL migrations
 
 ## API auth
 
