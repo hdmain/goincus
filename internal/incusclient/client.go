@@ -3,6 +3,7 @@ package incusclient
 import (
 	"fmt"
 	"io"
+	"net"
 	"strconv"
 	"strings"
 
@@ -426,6 +427,8 @@ func (c *Client) EnsureStarted(name string) error {
 }
 
 // AddProxyDevice attaches an Incus proxy device mapping host:external -> container:internal.
+// Uses forkproxy (connect to 127.0.0.1 in the container netns). NAT mode is only used when
+// the instance already has a usable static/dynamic IPv4, because Incus NAT proxies reject 127.0.0.1.
 func (c *Client) AddProxyDevice(instanceName, deviceName, protocol string, hostPort, internalPort int) error {
 	inst, etag, err := c.server.GetInstance(instanceName)
 	if err != nil {
@@ -436,18 +439,77 @@ func (c *Client) AddProxyDevice(instanceName, deviceName, protocol string, hostP
 		inst.Devices = map[string]map[string]string{}
 	}
 
-	inst.Devices[deviceName] = map[string]string{
-		"type":    "proxy",
-		"listen":  fmt.Sprintf("%s:0.0.0.0:%d", protocol, hostPort),
-		"connect": fmt.Sprintf("%s:127.0.0.1:%d", protocol, internalPort),
-		"nat":     "true",
+	device := map[string]string{
+		"type":   "proxy",
+		"listen": fmt.Sprintf("%s:0.0.0.0:%d", protocol, hostPort),
 	}
+
+	// NAT proxies require a configured static IPv4 on the instance NIC.
+	// DHCP-only addresses are rejected by Incus ("must be one of the instance's static IPv4 addresses").
+	if ip := staticIPv4FromDevices(inst.Devices); ip != "" {
+		device["connect"] = fmt.Sprintf("%s:%s:%d", protocol, ip, internalPort)
+		device["nat"] = "true"
+	} else {
+		// forkproxy: connect inside the container netns (works with DHCP / no IPv4 on eth0).
+		device["connect"] = fmt.Sprintf("%s:127.0.0.1:%d", protocol, internalPort)
+	}
+
+	inst.Devices[deviceName] = device
 
 	op, err := c.server.UpdateInstance(instanceName, inst.Writable(), etag)
 	if err != nil {
 		return fmt.Errorf("add proxy device: %w", err)
 	}
-	return op.Wait()
+	if err := op.Wait(); err != nil {
+		if device["nat"] == "true" {
+			return c.addForkProxyDevice(instanceName, deviceName, protocol, hostPort, internalPort, err)
+		}
+		return fmt.Errorf("add proxy device: %w", err)
+	}
+	return nil
+}
+
+func staticIPv4FromDevices(devices map[string]map[string]string) string {
+	for _, dev := range devices {
+		if dev["type"] != "nic" {
+			continue
+		}
+		ip := strings.TrimSpace(dev["ipv4.address"])
+		if ip == "" || strings.EqualFold(ip, "none") || strings.Contains(ip, "dhcp") {
+			continue
+		}
+		// Accept "10.0.0.2" or "10.0.0.2/24".
+		if i := strings.IndexByte(ip, '/'); i >= 0 {
+			ip = ip[:i]
+		}
+		if net.ParseIP(ip) != nil && strings.Contains(ip, ".") {
+			return ip
+		}
+	}
+	return ""
+}
+
+func (c *Client) addForkProxyDevice(instanceName, deviceName, protocol string, hostPort, internalPort int, natErr error) error {
+	inst, etag, err := c.server.GetInstance(instanceName)
+	if err != nil {
+		return fmt.Errorf("add proxy device: %w (nat failed: %v)", err, natErr)
+	}
+	if inst.Devices == nil {
+		inst.Devices = map[string]map[string]string{}
+	}
+	inst.Devices[deviceName] = map[string]string{
+		"type":    "proxy",
+		"listen":  fmt.Sprintf("%s:0.0.0.0:%d", protocol, hostPort),
+		"connect": fmt.Sprintf("%s:127.0.0.1:%d", protocol, internalPort),
+	}
+	op, err := c.server.UpdateInstance(instanceName, inst.Writable(), etag)
+	if err != nil {
+		return fmt.Errorf("add proxy device: %w (nat failed: %v)", err, natErr)
+	}
+	if err := op.Wait(); err != nil {
+		return fmt.Errorf("add proxy device: %w (nat failed: %v)", err, natErr)
+	}
+	return nil
 }
 
 // RemoveProxyDevice deletes a proxy device from the container.
