@@ -3,6 +3,8 @@ package incusclient
 import (
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/lxc/incus/v6/shared/api"
@@ -39,10 +41,68 @@ func (c *Client) HardenNetwork(name string) error {
 		set("dns.mode", "managed")
 	}
 	set("ipv6.address", "none")
-	if !changed {
+	if changed {
+		if err := c.server.UpdateNetwork(name, n.Writable(), etag); err != nil {
+			return err
+		}
+		if refreshed, _, err := c.server.GetNetwork(name); err == nil {
+			n = refreshed
+		}
+	}
+	// Host FORWARD/MASQUERADE — Docker often sets FORWARD DROP and breaks guest egress.
+	cidr := ""
+	if n.Config != nil {
+		cidr = n.Config["ipv4.address"]
+	}
+	_ = EnsureHostOutboundNAT(name, cidr)
+	return nil
+}
+
+// EnsureHostOutboundNAT enables IPv4 forwarding and installs firewall rules so
+// containers on the Incus bridge can reach the internet (works alongside Docker).
+func EnsureHostOutboundNAT(bridgeName, gatewayCIDR string) error {
+	if bridgeName == "" {
 		return nil
 	}
-	return c.server.UpdateNetwork(name, n.Writable(), etag)
+	_ = os.WriteFile("/etc/sysctl.d/99-goincus-forward.conf", []byte("net.ipv4.ip_forward=1\n"), 0o644)
+	_ = exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").Run()
+
+	subnet := ""
+	if gatewayCIDR != "" {
+		if _, ipNet, err := net.ParseCIDR(gatewayCIDR); err == nil {
+			subnet = ipNet.String()
+		}
+	}
+	if subnet == "" {
+		subnet = "10.72.160.0/24"
+	}
+
+	script := fmt.Sprintf(`
+set -e
+BR=%q
+SUBNET=%q
+# Prefer iptables-nft when present.
+IPT="$(command -v iptables-nft || command -v iptables || true)"
+if [ -z "$IPT" ]; then
+  exit 0
+fi
+# MASQUERADE guest traffic leaving the host.
+$IPT -t nat -C POSTROUTING -s "$SUBNET" ! -d "$SUBNET" -j MASQUERADE 2>/dev/null \
+  || $IPT -t nat -A POSTROUTING -s "$SUBNET" ! -d "$SUBNET" -j MASQUERADE
+# Allow forwarded traffic for the Incus bridge (Docker sets FORWARD DROP).
+$IPT -C FORWARD -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I FORWARD 1 -i "$BR" -j ACCEPT
+$IPT -C FORWARD -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I FORWARD 1 -o "$BR" -j ACCEPT
+# Docker's DOCKER-USER hook — accept Incus bridge traffic early.
+if $IPT -L DOCKER-USER -n >/dev/null 2>&1; then
+  $IPT -C DOCKER-USER -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -i "$BR" -j ACCEPT
+  $IPT -C DOCKER-USER -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -o "$BR" -j ACCEPT
+fi
+`, bridgeName, subnet)
+	out, err := exec.Command("bash", "-lc", script).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("host outbound nat: %w (%s)", err, string(out))
+	}
+	return nil
 }
 
 // NetworkIPv4CIDR returns the managed bridge IPv4 CIDR (gateway/mask).
@@ -297,15 +357,16 @@ apply_runtime() {
 }
 apply_runtime
 
-# Brief settle; retry once if verification fails.
-for _ in 1 2 3; do
-  if ip -4 addr show dev "$IFACE" | grep -Fq "$IP"; then
+# Brief settle; retry if address or default route is missing.
+for _ in 1 2 3 4 5; do
+  if ip -4 addr show dev "$IFACE" | grep -Fq "$IP" && ip -4 route show default | grep -Fq "$GW"; then
     exit 0
   fi
   sleep 1
   apply_runtime
 done
 ip -4 addr show dev "$IFACE" || true
+ip -4 route || true
 exit 1
 `, ip, gw, mask, netmask)
 
