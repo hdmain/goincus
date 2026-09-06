@@ -41,7 +41,27 @@ Authorization: Bearer <api_key>
 
 or `X-API-Key: <api_key>`.
 
-## Example
+## Examples
+
+Python scripts in [`example/`](example/) (stdlib only):
+
+```bash
+export GOINCUS_URL=http://127.0.0.1:9603
+export GOINCUS_API_KEY=gic_...
+
+python example/health.py
+python example/create.py web-1
+python example/list.py
+python example/get.py <id>
+python example/start.py <id>
+python example/stop.py <id>
+python example/restart.py <id>
+python example/add_port.py <id> 443
+python example/remove_port.py <id> <port-id>
+python example/delete.py <id>
+```
+
+Or with curl:
 
 ```bash
 curl -s -H "Authorization: Bearer $GOINCUS_API_KEY" \
