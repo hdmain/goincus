@@ -88,8 +88,12 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	fmt.Println("==> Initializing Incus...")
-	if err := configureIncus(); err != nil {
+	pool, err := configureIncus()
+	if err != nil {
 		return nil, fmt.Errorf("configure incus: %w", err)
+	}
+	if pool != "" {
+		cfg.Incus.StoragePool = pool
 	}
 	_ = incusclient.EnsureHostIsolation()
 
@@ -278,7 +282,7 @@ daemonize no
 	return nil
 }
 
-func configureIncus() error {
+func configureIncus() (string, error) {
 	_ = run("systemctl", "enable", "--now", "incus")
 	_ = run("systemctl", "enable", "--now", "incus.service")
 
@@ -323,16 +327,20 @@ cluster: null
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("incus init: %w", err)
+				return "", fmt.Errorf("incus init: %w", err)
 			}
 		}
 	}
 
 	// Already-initialized hosts may still lack the default bridge/pool.
-	if err := ensureIncusNetworkAndPool(); err != nil {
-		return err
+	pool, err := ensureIncusNetworkAndPool()
+	if err != nil {
+		return "", err
 	}
-	return ensureHostIDMaps()
+	if err := ensureHostIDMaps(); err != nil {
+		return pool, err
+	}
+	return pool, nil
 }
 
 func ensureHostIDMaps() error {
@@ -359,39 +367,10 @@ func ensureHostIDMaps() error {
 	return nil
 }
 
-func ensureIncusNetworkAndPool() error {
-	// Prefer a quota-capable pool so guests see their disk size in df (not the host disk).
-	if err := run("incus", "storage", "show", "goincus"); err != nil {
-		created := false
-		for _, args := range [][]string{
-			{"storage", "create", "goincus", "zfs", "size=200GiB"},
-			{"storage", "create", "goincus", "lvm", "size=200GiB"},
-			{"storage", "create", "goincus", "btrfs", "size=200GiB"},
-		} {
-			if err := run("incus", args...); err == nil {
-				created = true
-				fmt.Printf("    Created Incus storage pool goincus (%s)\n", args[3])
-				break
-			}
-		}
-		if !created {
-			if err := run("incus", "storage", "create", "goincus", "dir"); err != nil {
-				// Fall back to default dir pool if goincus cannot be created.
-				if err := run("incus", "storage", "show", "default"); err != nil {
-					if err := run("incus", "storage", "create", "default", "dir"); err != nil {
-						return fmt.Errorf("create storage pool: %w", err)
-					}
-				}
-				fmt.Println("    Warning: using dir storage — df inside guests shows host disk size")
-			} else {
-				fmt.Println("    Created Incus storage pool goincus (dir — limited isolation)")
-			}
-		}
-	}
-
-	pool := "goincus"
-	if err := run("incus", "storage", "show", "goincus"); err != nil {
-		pool = "default"
+func ensureIncusNetworkAndPool() (string, error) {
+	pool, err := ensureDFIsolatingStoragePool()
+	if err != nil {
+		return "", err
 	}
 
 	if err := run("incus", "network", "show", "incusbr0"); err != nil {
@@ -403,12 +382,12 @@ func ensureIncusNetworkAndPool() error {
 					fmt.Printf("    Using existing Incus network %q\n", parts[0])
 					_ = run("incus", "profile", "device", "set", "default", "eth0", "network="+parts[0])
 					_ = run("incus", "profile", "device", "add", "default", "root", "disk", "path=/", "pool="+pool)
-					return nil
+					return pool, nil
 				}
 			}
 		}
 		if err := run("incus", "network", "create", "incusbr0", "ipv4.address=auto", "ipv4.nat=true", "ipv6.address=none"); err != nil {
-			return fmt.Errorf("create network incusbr0: %w", err)
+			return "", fmt.Errorf("create network incusbr0: %w", err)
 		}
 	}
 
@@ -416,7 +395,62 @@ func ensureIncusNetworkAndPool() error {
 	_ = run("incus", "profile", "device", "set", "default", "eth0", "network=incusbr0")
 	_ = run("incus", "profile", "device", "add", "default", "root", "disk", "path=/", "pool="+pool)
 	_ = run("incus", "profile", "device", "set", "default", "root", "pool="+pool)
-	return nil
+	return pool, nil
+}
+
+// ensureDFIsolatingStoragePool creates/selects zfs or lvm so guest `df` shows storage_gb.
+// dir/btrfs always report the host/pool size in df — never use them for goincus VPS roots.
+func ensureDFIsolatingStoragePool() (string, error) {
+	candidates := []string{"goincus", "goincus-lvm", "goincus-zfs"}
+	for _, name := range candidates {
+		driver, err := incusStorageDriver(name)
+		if err == nil && isDFIsolatingStorageDriver(driver) {
+			fmt.Printf("    Using Incus storage pool %s (%s)\n", name, driver)
+			return name, nil
+		}
+	}
+
+	for _, name := range candidates {
+		if _, err := incusStorageDriver(name); err == nil {
+			continue // exists but wrong driver
+		}
+		for _, driver := range []string{"zfs", "lvm"} {
+			args := []string{"storage", "create", name, driver, "size=200GiB"}
+			if err := run("incus", args...); err == nil {
+				fmt.Printf("    Created Incus storage pool %s (%s) — guest df will show disk quota\n", name, driver)
+				return name, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf(
+		"need zfs or lvm storage for disk isolation (dir/btrfs show host disk in guest df). "+
+			"Install: apt install -y lvm2 thin-provisioning-tools   # or: apt install -y zfsutils-linux\n"+
+			"Then: incus storage create goincus-lvm lvm size=200GiB",
+	)
+}
+
+func isDFIsolatingStorageDriver(driver string) bool {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "zfs", "lvm", "lvmcluster", "ceph":
+		return true
+	default:
+		return false
+	}
+}
+
+func incusStorageDriver(name string) (string, error) {
+	out, err := exec.Command("incus", "storage", "show", name).Output()
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "driver:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "driver:")), nil
+		}
+	}
+	return "", fmt.Errorf("driver not found for pool %s", name)
 }
 
 func installSupportFiles() error {

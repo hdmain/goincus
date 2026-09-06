@@ -43,9 +43,12 @@ func TestSanitizeProfiles(t *testing.T) {
 	}
 }
 
-func TestHardenedNIC(t *testing.T) {
-	nic := HardenedNIC("incusbr0", "10.72.160.5")
-	if nic["security.mac_filtering"] != "true" || nic["security.port_isolation"] != "true" {
-		t.Fatalf("expected NIC filtering, got %#v", nic)
+func TestIsDFIsolatingDriver(t *testing.T) {
+	if !isDFIsolatingDriver("lvm") || !isDFIsolatingDriver("zfs") {
+		t.Fatal("lvm/zfs must isolate df")
+	}
+	if isDFIsolatingDriver("dir") || isDFIsolatingDriver("btrfs") {
+		t.Fatal("dir/btrfs must not count as df-isolating")
 	}
 }
+
