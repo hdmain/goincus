@@ -168,7 +168,7 @@ func Default() *Config {
 			ImageServer:   "https://images.linuxcontainers.org",
 			ImageProtocol: "simplestreams",
 			DefaultImage:  "ubuntu/24.04",
-			Profiles:      []string{"default", "goincus-unprivileged"},
+			Profiles:      []string{"goincus-unprivileged"},
 		},
 		Ports: PortsConfig{
 			HostRangeStart:       20000,

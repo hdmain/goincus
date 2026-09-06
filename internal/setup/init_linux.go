@@ -327,7 +327,34 @@ cluster: null
 	}
 
 	// Already-initialized hosts may still lack the default bridge/pool.
-	return ensureIncusNetworkAndPool()
+	if err := ensureIncusNetworkAndPool(); err != nil {
+		return err
+	}
+	return ensureHostIDMaps()
+}
+
+func ensureHostIDMaps() error {
+	const entry = "root:1000000:1000000000"
+	for _, path := range []string{"/etc/subuid", "/etc/subgid"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if writeErr := os.WriteFile(path, []byte(entry+"\n"), 0o644); writeErr != nil {
+				return fmt.Errorf("write %s: %w", path, writeErr)
+			}
+			continue
+		}
+		if strings.Contains(string(data), "root:") {
+			continue
+		}
+		if !strings.HasSuffix(string(data), "\n") && len(data) > 0 {
+			data = append(data, '\n')
+		}
+		if err := os.WriteFile(path, append(data, []byte(entry+"\n")...), 0o644); err != nil {
+			return fmt.Errorf("update %s: %w", path, err)
+		}
+	}
+	fmt.Println("    Ensured root entries in /etc/subuid and /etc/subgid")
+	return nil
 }
 
 func ensureIncusNetworkAndPool() error {

@@ -36,7 +36,6 @@ incus:
   image_protocol: "simplestreams"
   default_image: "ubuntu/24.04"
   profiles:
-    - "default"
     - "goincus-unprivileged"
 
 ports:

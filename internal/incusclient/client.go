@@ -2,7 +2,9 @@ package incusclient
 
 import (
 	"fmt"
+	"io"
 	"strconv"
+	"strings"
 
 	incus "github.com/lxc/incus/v6/client"
 	"github.com/lxc/incus/v6/shared/api"
@@ -167,22 +169,17 @@ func (c *Client) EnsureNetwork() (string, error) {
 }
 
 // EnsureUnprivilegedProfile creates or updates the hardened security profile.
-// Unprivileged containers, isolated idmaps, and disabled nesting reduce escape surface.
+// Unprivileged containers with nesting disabled reduce escape surface.
 func (c *Client) EnsureUnprivilegedProfile() error {
 	profile := api.ProfilesPost{
 		Name: UnprivilegedProfile,
 		ProfilePut: api.ProfilePut{
 			Description: "goincus hardened unprivileged profile — blocks common container escape vectors",
 			Config: map[string]string{
-				"security.privileged":                    "false",
-				"security.nesting":                       "false",
-				"security.idmap.isolated":                "true",
-				"security.syscalls.intercept.mknod":       "false",
-				"security.syscalls.intercept.setxattr":    "false",
-				"security.syscalls.intercept.sysinfo":     "false",
-				"security.syscalls.intercept.mount":       "false",
-				"security.syscalls.intercept.sched_setscheduler": "false",
-				"limits.kernel.pid_max":                  "4096",
+				"security.privileged": "false",
+				"security.nesting":    "false",
+				// Isolated idmaps often break starts when host subuid/subgid ranges are tight.
+				"security.idmap.isolated": "false",
 			},
 			Devices: map[string]map[string]string{},
 		},
@@ -190,12 +187,23 @@ func (c *Client) EnsureUnprivilegedProfile() error {
 
 	existing, etag, err := c.server.GetProfile(UnprivilegedProfile)
 	if err != nil {
-		// Profile missing — create it.
 		return c.server.CreateProfile(profile)
 	}
 
 	existing.Description = profile.Description
-	existing.Config = profile.Config
+	if existing.Config == nil {
+		existing.Config = map[string]string{}
+	}
+	for k, v := range profile.Config {
+		existing.Config[k] = v
+	}
+	// Drop keys that previously caused start failures on some hosts.
+	delete(existing.Config, "limits.kernel.pid_max")
+	delete(existing.Config, "security.syscalls.intercept.mknod")
+	delete(existing.Config, "security.syscalls.intercept.setxattr")
+	delete(existing.Config, "security.syscalls.intercept.sysinfo")
+	delete(existing.Config, "security.syscalls.intercept.mount")
+	delete(existing.Config, "security.syscalls.intercept.sched_setscheduler")
 	return c.server.UpdateProfile(UnprivilegedProfile, existing.Writable(), etag)
 }
 
@@ -282,27 +290,28 @@ func (c *Client) filterAvailableProfiles(profiles []string) []string {
 // ResourceConfig builds Incus instance config keys for CPU, memory, and process limits.
 func ResourceConfig(cpuCores, memoryMB, processes int) map[string]string {
 	return map[string]string{
-		"limits.cpu":              strconv.Itoa(cpuCores),
-		"limits.cpu.allowance":    "100%",
-		"limits.memory":           fmt.Sprintf("%dMiB", memoryMB),
-		"limits.memory.swap":      "false",
-		"limits.processes":        strconv.Itoa(processes),
-		"security.privileged":     "false",
-		"security.nesting":        "false",
-		"security.idmap.isolated": "true",
+		"limits.cpu":           strconv.Itoa(cpuCores),
+		"limits.cpu.allowance": "100%",
+		"limits.memory":        fmt.Sprintf("%dMiB", memoryMB),
+		"limits.memory.swap":   "false",
+		"limits.processes":     strconv.Itoa(processes),
+		"security.privileged":  "false",
+		"security.nesting":     "false",
 	}
 }
 
 // StartContainer starts a container.
 func (c *Client) StartContainer(name string) error {
-	return c.updateState(name, "start")
+	if err := c.updateState(name, "start"); err != nil {
+		return fmt.Errorf("%w%s", err, c.logSuffix(name))
+	}
+	return nil
 }
 
 // StopContainer stops a container.
 func (c *Client) StopContainer(name string, force bool) error {
-	action := "stop"
 	req := api.InstanceStatePut{
-		Action:  action,
+		Action:  "stop",
 		Timeout: 30,
 		Force:   force,
 	}
@@ -310,18 +319,24 @@ func (c *Client) StopContainer(name string, force bool) error {
 	if err != nil {
 		return fmt.Errorf("stop instance: %w", err)
 	}
-	return op.Wait()
+	if err := op.Wait(); err != nil {
+		return fmt.Errorf("wait stop instance: %w%s", err, c.logSuffix(name))
+	}
+	return nil
 }
 
 // RestartContainer restarts a container.
 func (c *Client) RestartContainer(name string) error {
-	return c.updateState(name, "restart")
+	if err := c.updateState(name, "restart"); err != nil {
+		return fmt.Errorf("%w%s", err, c.logSuffix(name))
+	}
+	return nil
 }
 
 func (c *Client) updateState(name, action string) error {
 	req := api.InstanceStatePut{
 		Action:  action,
-		Timeout: 30,
+		Timeout: 120,
 	}
 	op, err := c.server.UpdateInstanceState(name, req, "")
 	if err != nil {
@@ -331,6 +346,37 @@ func (c *Client) updateState(name, action string) error {
 		return fmt.Errorf("wait %s instance: %w", action, err)
 	}
 	return nil
+}
+
+func (c *Client) logSuffix(name string) string {
+	snippet := c.InstanceLogSnippet(name)
+	if snippet == "" {
+		return ""
+	}
+	return "; lxc.log: " + snippet
+}
+
+// InstanceLogSnippet returns the tail of lxc.log for diagnostics.
+func (c *Client) InstanceLogSnippet(name string) string {
+	rc, err := c.server.GetInstanceLogfile(name, "lxc.log")
+	if err != nil {
+		return ""
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(io.LimitReader(rc, 64*1024))
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) > 20 {
+		lines = lines[len(lines)-20:]
+	}
+	out := strings.Join(lines, " | ")
+	out = strings.ReplaceAll(out, "\n", " ")
+	if len(out) > 1500 {
+		out = "..." + out[len(out)-1500:]
+	}
+	return out
 }
 
 // DeleteContainer removes a container. Force-stops if still running.
