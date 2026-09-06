@@ -540,14 +540,66 @@ exit 0
 	if err := os.WriteFile("/usr/local/libexec/goincus/ensure-host-nat.sh", []byte(natScript), 0o755); err != nil {
 		return err
 	}
+	storageScript := `#!/bin/sh
+set -eu
+POOL_LVM="${GOINCUS_STORAGE_POOL:-goincus-lvm}"
+POOL_ZFS="${GOINCUS_STORAGE_POOL_ZFS:-goincus-zfs}"
+SIZE="${GOINCUS_STORAGE_SIZE:-200GiB}"
+log() { echo "goincus-storage: $*"; }
+have_bin() { command -v "$1" >/dev/null 2>&1; }
+install_pkgs() {
+  if have_bin lvcreate && have_bin vgcreate; then return 0; fi
+  [ "$(id -u)" -eq 0 ] || return 1
+  export DEBIAN_FRONTEND=noninteractive
+  if have_bin apt-get; then
+    log "installing lvm2 thin-provisioning-tools"
+    apt-get update -y >/dev/null 2>&1 || true
+    apt-get install -y lvm2 thin-provisioning-tools
+    apt-get install -y zfsutils-linux >/dev/null 2>&1 || true
+  elif have_bin dnf; then dnf install -y lvm2
+  elif have_bin yum; then yum install -y lvm2
+  else return 1
+  fi
+}
+pool_driver() { incus storage show "$1" 2>/dev/null | awk -F': ' '/^driver:/{print $2; exit}'; }
+is_good_driver() { case "$1" in zfs|lvm|lvmcluster|ceph) return 0 ;; *) return 1 ;; esac; }
+ensure_pool() {
+  name="$1"; driver="$2"
+  cur="$(pool_driver "$name" || true)"
+  if [ -n "$cur" ]; then
+    is_good_driver "$cur" && { log "pool $name already ok ($cur)"; return 0; }
+    return 1
+  fi
+  have_bin incus || return 1
+  case "$driver" in lvm) have_bin lvcreate || return 1 ;; zfs) have_bin zpool || return 1 ;; esac
+  log "creating pool $name ($driver size=$SIZE)"
+  incus storage create "$name" "$driver" "size=$SIZE"
+}
+install_pkgs || true
+for name in goincus "$POOL_LVM" "$POOL_ZFS"; do
+  d="$(pool_driver "$name" || true)"
+  is_good_driver "$d" && { log "ready: $name ($d)"; exit 0; }
+done
+ensure_pool "$POOL_LVM" lvm && exit 0
+ensure_pool goincus lvm && exit 0
+ensure_pool "$POOL_ZFS" zfs && exit 0
+ensure_pool goincus zfs && exit 0
+log "failed to create zfs/lvm pool"
+exit 1
+`
+	if err := os.WriteFile("/usr/local/libexec/goincus/ensure-host-storage.sh", []byte(storageScript), 0o755); err != nil {
+		return err
+	}
 	netUnit := `[Unit]
-Description=goincus host NAT/FORWARD for Incus bridge (Docker-safe)
+Description=goincus host NAT/FORWARD + storage pool bootstrap (Docker-safe)
 After=network-online.target incus.service docker.service
 Wants=network-online.target
+Wants=incus.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+ExecStart=/usr/local/libexec/goincus/ensure-host-storage.sh
 ExecStart=/usr/local/libexec/goincus/ensure-host-nat.sh
 
 [Install]

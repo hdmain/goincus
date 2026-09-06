@@ -20,6 +20,7 @@ cp "${ROOT}/configs/config.yaml" "${WORK}/SOURCES/config.yaml.example"
 cp "${ROOT}/deploy/systemd/goincus.service" "${WORK}/SOURCES/"
 cp "${ROOT}/deploy/systemd/goincus-net.service" "${WORK}/SOURCES/"
 cp "${ROOT}/deploy/scripts/ensure-host-nat.sh" "${WORK}/SOURCES/"
+cp "${ROOT}/deploy/scripts/ensure-host-storage.sh" "${WORK}/SOURCES/"
 cp "${ROOT}/migrations/"*.sql "${WORK}/SOURCES/"
 
 cat > "${WORK}/SPECS/goincus.spec" <<EOF
@@ -49,6 +50,7 @@ install -m 0644 %{_sourcedir}/config.yaml.example %{buildroot}/usr/share/goincus
 install -m 0644 %{_sourcedir}/goincus.service %{buildroot}/etc/systemd/system/goincus.service
 install -m 0644 %{_sourcedir}/goincus-net.service %{buildroot}/etc/systemd/system/goincus-net.service
 install -m 0755 %{_sourcedir}/ensure-host-nat.sh %{buildroot}/usr/local/libexec/goincus/ensure-host-nat.sh
+install -m 0755 %{_sourcedir}/ensure-host-storage.sh %{buildroot}/usr/local/libexec/goincus/ensure-host-storage.sh
 install -m 0644 %{_sourcedir}/*.sql %{buildroot}/usr/share/goincus/migrations/
 printf '%s\\n' '# Live config is created by: sudo goincus init' > %{buildroot}/etc/goincus/.keep
 
@@ -56,6 +58,7 @@ printf '%s\\n' '# Live config is created by: sudo goincus init' > %{buildroot}/e
 /usr/local/bin/goincus
 /usr/share/goincus/config.yaml.example
 /usr/local/libexec/goincus/ensure-host-nat.sh
+/usr/local/libexec/goincus/ensure-host-storage.sh
 /etc/goincus/.keep
 /etc/systemd/system/goincus.service
 /etc/systemd/system/goincus-net.service

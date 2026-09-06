@@ -28,6 +28,7 @@ install -m 0644 "${ROOT}/deploy/systemd/goincus.service" "${PKG_DIR}/etc/systemd
 install -m 0644 "${ROOT}/deploy/systemd/goincus-net.service" "${PKG_DIR}/etc/systemd/system/goincus-net.service"
 mkdir -p "${PKG_DIR}/usr/local/libexec/goincus"
 install -m 0755 "${ROOT}/deploy/scripts/ensure-host-nat.sh" "${PKG_DIR}/usr/local/libexec/goincus/ensure-host-nat.sh"
+install -m 0755 "${ROOT}/deploy/scripts/ensure-host-storage.sh" "${PKG_DIR}/usr/local/libexec/goincus/ensure-host-storage.sh"
 install -m 0644 "${ROOT}/migrations/"*.sql "${PKG_DIR}/usr/share/goincus/migrations/"
 
 # Keep an empty config dir owned by root.
@@ -44,7 +45,7 @@ Priority: optional
 Architecture: ${ARCH}
 Maintainer: hdmain <noreply@github.com>
 Depends: systemd
-Recommends: curl, ca-certificates
+Recommends: curl, ca-certificates, lvm2, thin-provisioning-tools
 Homepage: https://github.com/hdmain/goincus
 Description: Incus NAT VPS provisioning REST API
  goincus provisions and lifecycle-manages isolated LXC containers as NAT VPS

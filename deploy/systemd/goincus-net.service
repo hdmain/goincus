@@ -1,14 +1,16 @@
 [Unit]
-Description=goincus host NAT/FORWARD for Incus bridge (Docker-safe)
+Description=goincus host NAT/FORWARD + storage pool bootstrap (Docker-safe)
 Documentation=https://github.com/hdmain/goincus
 After=network-online.target incus.service docker.service
 Wants=network-online.target
+Wants=incus.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Storage first (apt + incus pool), then NAT/FORWARD rules.
+ExecStart=/usr/local/libexec/goincus/ensure-host-storage.sh
 ExecStart=/usr/local/libexec/goincus/ensure-host-nat.sh
-ExecStartPost=/bin/true
 
 [Install]
 WantedBy=multi-user.target

@@ -3,8 +3,10 @@ package incusclient
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/lxc/incus/v6/shared/api"
 )
@@ -26,7 +28,7 @@ func isDFIsolatingDriver(driver string) bool {
 }
 
 // EnsureStoragePool ensures a storage pool that isolates per-instance disk size in `df`.
-// Prefer zfs → lvm (loop-backed). Never silently keep using dir/btrfs for new VPS roots.
+// Installs LVM (and optionally ZFS) host packages when missing, then creates a loop-backed pool.
 func (c *Client) EnsureStoragePool() error {
 	wanted := strings.TrimSpace(c.cfg.StoragePool)
 	if wanted == "" {
@@ -39,25 +41,40 @@ func (c *Client) EnsureStoragePool() error {
 		return nil
 	}
 
-	// Configured pool missing or is dir/btrfs — stand up a real quota pool.
-	for _, name := range uniquePoolNames(wanted, quotaStoragePool, quotaStoragePool+"-lvm", quotaStoragePool+"-zfs") {
-		if err := c.ensureQuotaCapablePool(name); err == nil {
-			if pool, _, err := c.server.GetStoragePool(name); err == nil {
-				c.cfg.StoragePool = name
-				slog.Info("storage pool ready", "pool", name, "driver", pool.Driver)
-				return nil
-			}
-			c.cfg.StoragePool = name
-			return nil
-		}
+	// Auto-install disk tools, then create/select a quota-capable pool.
+	if err := ensureStorageHostPackages(); err != nil {
+		slog.Warn("storage package install", "err", err)
 	}
 
+	names := uniquePoolNames(wanted, quotaStoragePool, quotaStoragePool+"-lvm", quotaStoragePool+"-zfs")
+	var lastErr error
+	for _, name := range names {
+		if err := c.ensureQuotaCapablePool(name); err != nil {
+			lastErr = err
+			continue
+		}
+		if pool, _, err := c.server.GetStoragePool(name); err == nil {
+			c.cfg.StoragePool = name
+			slog.Info("storage pool ready", "pool", name, "driver", pool.Driver)
+			return nil
+		}
+		c.cfg.StoragePool = name
+		return nil
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no suitable pool")
+	}
 	return fmt.Errorf(
-		"no storage pool that isolates disk size in df (need zfs or lvm). "+
-			"Install packages then recreate: apt install -y lvm2 thin-provisioning-tools  # or zfsutils-linux; "+
-			"incus storage create goincus-lvm lvm size=200GiB; set storage_pool: goincus-lvm in config. "+
-			"dir/btrfs pools always show the host disk in guest df",
+		"could not prepare zfs/lvm storage pool automatically: %w "+
+			"(dir/btrfs always show host disk in guest df)",
+		lastErr,
 	)
+}
+
+// ActiveStoragePool returns the pool name currently used for new instances.
+func (c *Client) ActiveStoragePool() string {
+	return strings.TrimSpace(c.cfg.StoragePool)
 }
 
 func uniquePoolNames(names ...string) []string {
@@ -89,41 +106,20 @@ func (c *Client) ensureQuotaCapablePool(name string) error {
 
 func (c *Client) createQuotaStoragePool(name string) error {
 	loopSize := defaultPoolLoopSize
+	// Prefer LVM: we auto-install it and it makes df show the quota. ZFS if already present.
 	candidates := []struct {
 		driver string
 		config map[string]string
-		check  func() error
+		ready  func() bool
 	}{
-		{
-			"zfs", map[string]string{"size": loopSize},
-			func() error {
-				if _, err := exec.LookPath("zpool"); err != nil {
-					return err
-				}
-				if _, err := exec.LookPath("zfs"); err != nil {
-					return err
-				}
-				return nil
-			},
-		},
-		{
-			"lvm", map[string]string{"size": loopSize},
-			func() error {
-				if _, err := exec.LookPath("lvcreate"); err != nil {
-					return err
-				}
-				if _, err := exec.LookPath("vgcreate"); err != nil {
-					return err
-				}
-				return nil
-			},
-		},
+		{"lvm", map[string]string{"size": loopSize}, hasLVMTools},
+		{"zfs", map[string]string{"size": loopSize}, hasZFSTools},
 	}
 
 	var errs []string
 	for _, cand := range candidates {
-		if err := cand.check(); err != nil {
-			errs = append(errs, fmt.Sprintf("%s: tools missing (%v)", cand.driver, err))
+		if !cand.ready() {
+			errs = append(errs, fmt.Sprintf("%s: tools missing", cand.driver))
 			continue
 		}
 		req := api.StoragePoolsPost{
@@ -142,6 +138,87 @@ func (c *Client) createQuotaStoragePool(name string) error {
 		return nil
 	}
 	return fmt.Errorf("create storage pool %q: %s", name, strings.Join(errs, "; "))
+}
+
+func hasLVMTools() bool {
+	_, err1 := exec.LookPath("lvcreate")
+	_, err2 := exec.LookPath("vgcreate")
+	return err1 == nil && err2 == nil
+}
+
+func hasZFSTools() bool {
+	_, err1 := exec.LookPath("zpool")
+	_, err2 := exec.LookPath("zfs")
+	return err1 == nil && err2 == nil
+}
+
+// ensureStorageHostPackages installs LVM (required for df-isolated pools) and
+// optionally ZFS when the package manager is available. Safe to call repeatedly.
+func ensureStorageHostPackages() error {
+	if hasLVMTools() {
+		return nil
+	}
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("not root; cannot install lvm2")
+	}
+
+	slog.Info("installing host storage packages (lvm2, thin-provisioning-tools)")
+	env := map[string]string{
+		"DEBIAN_FRONTEND": "noninteractive",
+		"NEEDRESTART_MODE": "a",
+	}
+
+	switch {
+	case lookPath("apt-get"):
+		_ = runEnv(env, "apt-get", "update", "-y")
+		if err := runEnv(env, "apt-get", "install", "-y", "lvm2", "thin-provisioning-tools"); err != nil {
+			return fmt.Errorf("apt-get install lvm2: %w", err)
+		}
+		// Best-effort ZFS (large; may need reboot / DKMS — ignore failure).
+		_ = runEnv(env, "apt-get", "install", "-y", "zfsutils-linux")
+	case lookPath("dnf"):
+		if err := runEnv(nil, "dnf", "install", "-y", "lvm2"); err != nil {
+			return fmt.Errorf("dnf install lvm2: %w", err)
+		}
+	case lookPath("yum"):
+		if err := runEnv(nil, "yum", "install", "-y", "lvm2"); err != nil {
+			return fmt.Errorf("yum install lvm2: %w", err)
+		}
+	default:
+		return fmt.Errorf("no apt-get/dnf/yum found to install lvm2")
+	}
+
+	// Give udev/lvm a moment after package install.
+	time.Sleep(500 * time.Millisecond)
+	if !hasLVMTools() {
+		return fmt.Errorf("lvm2 installed but lvcreate still not in PATH")
+	}
+	slog.Info("host storage packages ready", "lvm", true, "zfs", hasZFSTools())
+	return nil
+}
+
+func lookPath(bin string) bool {
+	_, err := exec.LookPath(bin)
+	return err == nil
+}
+
+func runEnv(env map[string]string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	if len(env) > 0 {
+		cmd.Env = os.Environ()
+		for k, v := range env {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			return err
+		}
+		return fmt.Errorf("%w: %s", err, msg)
+	}
+	return nil
 }
 
 // RootDiskDevice builds the instance root disk with an enforced size quota.

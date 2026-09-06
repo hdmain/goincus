@@ -58,18 +58,10 @@ sudo systemctl enable --now goincus
 
 Package upgrades do **not** overwrite `/etc/goincus/config.yaml` (template lives at `/usr/share/goincus/config.yaml.example`).
 
-Disk size (`storage_gb`) requires an **LVM or ZFS** Incus pool so `df` inside the guest
-shows ~10G (not the host disk). **dir/btrfs always lie in `df`.** If create fails asking
-for lvm/zfs:
-
-```bash
-apt install -y lvm2 thin-provisioning-tools
-incus storage create goincus-lvm lvm size=200GiB
-# in /etc/goincus/config.yaml:
-#   storage_pool: "goincus-lvm"
-systemctl restart goincus   # or restart goincus serve
-# delete old VPS and create a new one
-```
+Disk size (`storage_gb`) needs an **LVM or ZFS** Incus pool so guest `df` shows ~10G.
+goincus **installs `lvm2` automatically** (on `serve` / `goincus-net`) and creates
+`goincus-lvm` if missing — then persists `storage_pool` in config. Recreate old VPS
+instances after the pool exists; dir/btrfs guests always show the host disk in `df`.
 
 ## Guest isolation
 

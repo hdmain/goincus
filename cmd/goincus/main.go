@@ -162,6 +162,14 @@ func runServe(args []string) int {
 		logger.Error("incus connect", "err", err)
 		return 1
 	}
+	if pool := incusCli.ActiveStoragePool(); pool != "" && pool != cfg.Incus.StoragePool {
+		cfg.Incus.StoragePool = pool
+		if err := config.Save(*configPath, cfg); err != nil {
+			logger.Warn("persist storage_pool", "pool", pool, "err", err)
+		} else {
+			logger.Info("updated config storage_pool", "pool", pool, "driver", incusCli.StoragePoolDriver())
+		}
+	}
 
 	allocator := ports.NewAllocator(cfg.Ports, store, rdb)
 	if err := allocator.Sync(ctx); err != nil {
@@ -185,6 +193,8 @@ func runServe(args []string) int {
 			"addr", cfg.Server.Addr(),
 			"database", fmt.Sprintf("%s:%d", cfg.Database.Host, cfg.Database.Port),
 			"redis", cfg.Redis.Addr(),
+			"storage_pool", incusCli.ActiveStoragePool(),
+			"storage_driver", incusCli.StoragePoolDriver(),
 		)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("http server", "err", err)
