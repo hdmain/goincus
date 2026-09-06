@@ -270,6 +270,9 @@ func (s *Service) ResolveInstance(ctx context.Context, idOrName string) (*models
 	s.syncStatusFromIncus(ctx, inst)
 	return inst, nil
 }
+
+// GetInstance returns one instance by ID and refreshes status from Incus.
+func (s *Service) GetInstance(ctx context.Context, id uuid.UUID) (*models.Instance, error) {
 	inst, err := s.store.GetInstance(ctx, id)
 	if err != nil {
 		if err == db.ErrNotFound {
