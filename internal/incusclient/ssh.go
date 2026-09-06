@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
-	"net"
 	"strings"
 	"time"
 
@@ -170,74 +169,4 @@ func (c *Client) exec(name, script string) (stdout string, stderr string, exitCo
 		}
 	}
 	return outBuf.String(), errBuf.String(), exitCode, nil
-}
-
-// AllocateContainerIPv4 picks a free address from the managed bridge pool for a static NIC.
-func (c *Client) AllocateContainerIPv4() (string, error) {
-	netName := c.cfg.Network
-	if netName == "" {
-		return "", fmt.Errorf("no network configured")
-	}
-	network, _, err := c.server.GetNetwork(netName)
-	if err != nil {
-		return "", err
-	}
-	cidr := network.Config["ipv4.address"]
-	if cidr == "" || strings.EqualFold(cidr, "none") {
-		return "", fmt.Errorf("network %q has no ipv4.address", netName)
-	}
-	ip, ipNet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return "", fmt.Errorf("parse network cidr %q: %w", cidr, err)
-	}
-	_ = ip
-
-	used := map[string]struct{}{}
-	if gw, _, err := parseHostFromCIDR(cidr); err == nil {
-		used[gw] = struct{}{}
-	}
-	leases, err := c.server.GetNetworkLeases(netName)
-	if err == nil {
-		for _, l := range leases {
-			if l.Address != "" {
-				used[l.Address] = struct{}{}
-			}
-		}
-	}
-	instances, err := c.server.GetInstances(api.InstanceTypeAny)
-	if err == nil {
-		for _, inst := range instances {
-			for _, devices := range []map[string]map[string]string{inst.Devices, inst.ExpandedDevices} {
-				for _, dev := range devices {
-					if dev["type"] != "nic" {
-						continue
-					}
-					addr := strings.Split(dev["ipv4.address"], "/")[0]
-					if addr != "" {
-						used[addr] = struct{}{}
-					}
-				}
-			}
-		}
-	}
-
-	base := ipNet.IP.To4()
-	if base == nil {
-		return "", fmt.Errorf("not ipv4 network: %s", cidr)
-	}
-	ones, bits := ipNet.Mask.Size()
-	if bits != 32 || ones >= 30 {
-		return "", fmt.Errorf("unsupported ipv4 mask for %q", cidr)
-	}
-	maxHosts := 1 << (32 - ones)
-	netInt := uint32(base[0])<<24 | uint32(base[1])<<16 | uint32(base[2])<<8 | uint32(base[3])
-	for host := 2; host < maxHosts-1 && host < 250; host++ {
-		candInt := netInt + uint32(host)
-		cand := net.IPv4(byte(candInt>>24), byte(candInt>>16), byte(candInt>>8), byte(candInt)).String()
-		if _, ok := used[cand]; ok {
-			continue
-		}
-		return cand, nil
-	}
-	return "", fmt.Errorf("no free ipv4 addresses on %s", netName)
 }

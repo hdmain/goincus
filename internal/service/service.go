@@ -190,6 +190,11 @@ func (s *Service) provision(ctx context.Context, inst *models.Instance, internal
 		return
 	}
 
+	if _, err := s.incus.EnsureInstanceIPv4(inst.IncusName); err != nil {
+		s.fail(ctx, inst.ID, fmt.Errorf("assign ipv4: %w", err))
+		return
+	}
+
 	// Give the guest a moment to boot before apt/ssh setup.
 	time.Sleep(5 * time.Second)
 
@@ -225,6 +230,9 @@ func (s *Service) bootstrapSSH(ctx context.Context, inst *models.Instance) error
 	}
 	if netName := s.cfg.Incus.Network; netName != "" {
 		_ = s.incus.HardenNetwork(netName)
+	}
+	if _, err := s.incus.EnsureInstanceIPv4(inst.IncusName); err != nil {
+		return fmt.Errorf("assign ipv4: %w", err)
 	}
 	_ = s.incus.ConfigureGuestDNS(inst.IncusName)
 	if err := s.incus.EnsureSSH(inst.IncusName, pass); err != nil {

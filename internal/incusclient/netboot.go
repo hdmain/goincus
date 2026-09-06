@@ -39,37 +39,6 @@ func (g guestOS) cacheDir() string {
 	return filepath.Join(hostDebCacheRoot, id+"-"+code+"-"+arch)
 }
 
-// HardenNetwork ensures NAT + DNS are enabled on a managed bridge.
-func (c *Client) HardenNetwork(name string) error {
-	n, etag, err := c.server.GetNetwork(name)
-	if err != nil {
-		return err
-	}
-	if n.Config == nil {
-		n.Config = map[string]string{}
-	}
-	changed := false
-	set := func(k, v string) {
-		if n.Config[k] != v {
-			n.Config[k] = v
-			changed = true
-		}
-	}
-	if n.Config["ipv4.address"] == "" || strings.EqualFold(n.Config["ipv4.address"], "none") {
-		set("ipv4.address", "auto")
-	}
-	set("ipv4.nat", "true")
-	set("ipv4.dhcp", "true")
-	if n.Config["dns.mode"] == "" {
-		set("dns.mode", "managed")
-	}
-	set("ipv6.address", "none")
-	if !changed {
-		return nil
-	}
-	return c.server.UpdateNetwork(name, n.Writable(), etag)
-}
-
 // ConfigureGuestDNS brings up the NIC if needed and writes public resolvers.
 func (c *Client) ConfigureGuestDNS(name string) error {
 	bridgeDNS := ""

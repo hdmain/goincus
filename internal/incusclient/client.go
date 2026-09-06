@@ -161,7 +161,7 @@ func (c *Client) EnsureNetwork() (string, error) {
 		NetworkPut: api.NetworkPut{
 			Description: "goincus NAT bridge",
 			Config: map[string]string{
-				"ipv4.address": "auto",
+				"ipv4.address": defaultBridgeCIDR,
 				"ipv4.nat":     "true",
 				"ipv4.dhcp":    "true",
 				"dns.mode":     "managed",
@@ -254,9 +254,11 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 		"network": c.cfg.Network,
 		"name":    "eth0",
 	}
-	if ip, err := c.AllocateContainerIPv4(); err == nil {
-		eth0["ipv4.address"] = ip
+	ip, err := c.AllocateContainerIPv4()
+	if err != nil {
+		return fmt.Errorf("allocate static ipv4: %w", err)
 	}
+	eth0["ipv4.address"] = ip
 
 	req := api.InstancesPost{
 		Name: args.Name,
