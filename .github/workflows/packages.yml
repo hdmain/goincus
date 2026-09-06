@@ -141,15 +141,16 @@ jobs:
           # Silence apt Translation-en 404 noise for this flat repo.
           : > Translation-en
           gzip -k -f Translation-en
-          printf '%s\n' \
-            'Origin: goincus' \
-            'Label: goincus' \
-            'Suite: stable' \
-            'Codename: stable' \
-            'Architectures: amd64 arm64' \
-            'Components: main' \
-            'Description: goincus packages' \
-            > Release
+          # Proper Release with Date + MD5/SHA256 hashes (avoids apt warnings).
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin=goincus \
+            -o APT::FTPArchive::Release::Label=goincus \
+            -o APT::FTPArchive::Release::Suite=stable \
+            -o APT::FTPArchive::Release::Codename=stable \
+            -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
+            -o APT::FTPArchive::Release::Components=main \
+            -o APT::FTPArchive::Release::Description="goincus packages" \
+            release . > Release
           if ls rpm/*.rpm >/dev/null 2>&1; then
             createrepo_c rpm
           fi
