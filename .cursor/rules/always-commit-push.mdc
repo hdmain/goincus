@@ -1,0 +1,19 @@
+---
+description: Always commit and push completed work to origin without waiting to be asked
+alwaysApply: true
+---
+
+# Always commit and push
+
+When finishing meaningful work in this repo (features, fixes, packaging, docs):
+
+1. Commit with a clear message (why over what).
+2. Push to `origin` on the current branch immediately.
+3. Do not wait for the user to ask "commit" or "push".
+
+Exceptions:
+
+- Do not commit secrets (`.env`, credentials, private keys).
+- Do not force-push to `main`/`master` unless the user explicitly requests it.
+- Do not skip hooks unless the user explicitly requests it.
+- If there is nothing to commit, say so and still push only if the branch is ahead of origin.
