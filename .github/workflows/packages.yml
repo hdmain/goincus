@@ -70,11 +70,14 @@ jobs:
             "${{ matrix.deb_arch }}" \
             "dist/goincus-linux-${{ matrix.goarch }}" \
             dist
-          bash packaging/build-rpm.sh \
-            "${{ steps.ver.outputs.version }}" \
-            "${{ matrix.rpm_arch }}" \
-            "dist/goincus-linux-${{ matrix.goarch }}" \
-            dist
+          # rpmbuild on ubuntu-amd64 cannot target aarch64.
+          if [ "${{ matrix.rpm_arch }}" = "x86_64" ]; then
+            bash packaging/build-rpm.sh \
+              "${{ steps.ver.outputs.version }}" \
+              "${{ matrix.rpm_arch }}" \
+              "dist/goincus-linux-${{ matrix.goarch }}" \
+              dist
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
