@@ -56,6 +56,8 @@ sudo systemctl enable --now goincus
 4. Write `/etc/goincus/config.yaml` with generated DB password and API keys
 5. Install the systemd unit and SQL migrations
 
+Package upgrades do **not** overwrite `/etc/goincus/config.yaml` (template lives at `/usr/share/goincus/config.yaml.example`).
+
 ## SSH access
 
 New instances get OpenSSH installed automatically and a generated `root_password`
