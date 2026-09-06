@@ -36,6 +36,9 @@ func Connect(cfg config.IncusConfig) (*Client, error) {
 	if err := c.EnsureUnprivilegedProfile(); err != nil {
 		return nil, err
 	}
+	if err := c.EnsureInfrastructure(); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -43,6 +46,124 @@ func Connect(cfg config.IncusConfig) (*Client, error) {
 func (c *Client) Ping() error {
 	_, _, err := c.server.GetServer()
 	return err
+}
+
+// EnsureInfrastructure makes sure the configured storage pool and network exist.
+// If the configured network is missing, it prefers an existing bridge; otherwise it creates one.
+func (c *Client) EnsureInfrastructure() error {
+	if err := c.EnsureStoragePool(); err != nil {
+		return err
+	}
+	network, err := c.EnsureNetwork()
+	if err != nil {
+		return err
+	}
+	c.cfg.Network = network
+	if err := c.alignDefaultProfileNetwork(network); err != nil {
+		return err
+	}
+	return nil
+}
+
+// alignDefaultProfileNetwork rewrites default profile eth0 to a network that exists.
+func (c *Client) alignDefaultProfileNetwork(network string) error {
+	profile, etag, err := c.server.GetProfile("default")
+	if err != nil {
+		return nil
+	}
+	changed := false
+	if profile.Devices == nil {
+		profile.Devices = map[string]map[string]string{}
+	}
+	eth0, ok := profile.Devices["eth0"]
+	if !ok {
+		profile.Devices["eth0"] = map[string]string{
+			"type":    "nic",
+			"network": network,
+			"name":    "eth0",
+		}
+		changed = true
+	} else if eth0["network"] != network {
+		eth0["network"] = network
+		eth0["type"] = "nic"
+		if eth0["name"] == "" {
+			eth0["name"] = "eth0"
+		}
+		profile.Devices["eth0"] = eth0
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return c.server.UpdateProfile("default", profile.Writable(), etag)
+}
+
+// EnsureStoragePool creates the configured storage pool when absent.
+func (c *Client) EnsureStoragePool() error {
+	name := c.cfg.StoragePool
+	if name == "" {
+		name = "default"
+		c.cfg.StoragePool = name
+	}
+	if _, _, err := c.server.GetStoragePool(name); err == nil {
+		return nil
+	}
+
+	req := api.StoragePoolsPost{
+		Name:   name,
+		Driver: "dir",
+		StoragePoolPut: api.StoragePoolPut{
+			Description: "goincus default storage pool",
+		},
+	}
+	if err := c.server.CreateStoragePool(req); err != nil {
+		return fmt.Errorf("create storage pool %q: %w", name, err)
+	}
+	return nil
+}
+
+// EnsureNetwork returns a usable managed network name, creating one if needed.
+func (c *Client) EnsureNetwork() (string, error) {
+	wanted := c.cfg.Network
+	if wanted == "" {
+		wanted = "incusbr0"
+	}
+
+	if _, _, err := c.server.GetNetwork(wanted); err == nil {
+		return wanted, nil
+	}
+
+	// Prefer any existing bridge network instead of failing hard.
+	networks, err := c.server.GetNetworks()
+	if err == nil {
+		for _, n := range networks {
+			if n.Type == "bridge" && n.Managed {
+				return n.Name, nil
+			}
+		}
+		for _, n := range networks {
+			if n.Managed {
+				return n.Name, nil
+			}
+		}
+	}
+
+	req := api.NetworksPost{
+		Name: wanted,
+		Type: "bridge",
+		NetworkPut: api.NetworkPut{
+			Description: "goincus NAT bridge",
+			Config: map[string]string{
+				"ipv4.address": "auto",
+				"ipv4.nat":     "true",
+				"ipv6.address": "none",
+			},
+		},
+	}
+	if err := c.server.CreateNetwork(req); err != nil {
+		return "", fmt.Errorf("create network %q: %w", wanted, err)
+	}
+	return wanted, nil
 }
 
 // EnsureUnprivilegedProfile creates or updates the hardened security profile.
@@ -91,6 +212,10 @@ type CreateArgs struct {
 
 // CreateContainer provisions an unprivileged LXC container with resource limits.
 func (c *Client) CreateContainer(args CreateArgs) error {
+	if err := c.EnsureInfrastructure(); err != nil {
+		return err
+	}
+
 	image := args.Image
 	if image == "" {
 		image = c.cfg.DefaultImage
@@ -100,6 +225,7 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 	if len(profiles) == 0 {
 		profiles = c.cfg.Profiles
 	}
+	profiles = c.filterAvailableProfiles(profiles)
 
 	req := api.InstancesPost{
 		Name: args.Name,
@@ -137,6 +263,20 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 		return fmt.Errorf("wait create instance: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) filterAvailableProfiles(profiles []string) []string {
+	out := make([]string, 0, len(profiles))
+	for _, name := range profiles {
+		if _, _, err := c.server.GetProfile(name); err != nil {
+			continue
+		}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return []string{UnprivilegedProfile}
+	}
+	return out
 }
 
 // ResourceConfig builds Incus instance config keys for CPU, memory, and process limits.

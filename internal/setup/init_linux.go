@@ -280,14 +280,12 @@ func configureIncus() error {
 	_ = run("systemctl", "enable", "--now", "incus")
 	_ = run("systemctl", "enable", "--now", "incus.service")
 
-	if err := run("incus", "info"); err == nil {
-		return nil
-	}
-
-	preseed := `config: {}
+	if err := run("incus", "info"); err != nil {
+		preseed := `config: {}
 networks:
 - config:
     ipv4.address: auto
+    ipv4.nat: "true"
     ipv6.address: none
   description: ""
   name: incusbr0
@@ -313,19 +311,52 @@ profiles:
 projects: []
 cluster: null
 `
-	cmd := exec.Command("incus", "admin", "init", "--preseed")
-	cmd.Stdin = strings.NewReader(preseed)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		cmd = exec.Command("incus", "init", "--preseed")
+		cmd := exec.Command("incus", "admin", "init", "--preseed")
 		cmd.Stdin = strings.NewReader(preseed)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("incus init: %w", err)
+			cmd = exec.Command("incus", "init", "--preseed")
+			cmd.Stdin = strings.NewReader(preseed)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("incus init: %w", err)
+			}
 		}
 	}
+
+	// Already-initialized hosts may still lack the default bridge/pool.
+	return ensureIncusNetworkAndPool()
+}
+
+func ensureIncusNetworkAndPool() error {
+	if err := run("incus", "storage", "show", "default"); err != nil {
+		if err := run("incus", "storage", "create", "default", "dir"); err != nil {
+			return fmt.Errorf("create storage pool default: %w", err)
+		}
+	}
+
+	if err := run("incus", "network", "show", "incusbr0"); err != nil {
+		// Reuse any existing managed bridge if present.
+		if out, err := exec.Command("incus", "network", "list", "-f", "csv", "-c", "n,t").Output(); err == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				parts := strings.Split(strings.TrimSpace(line), ",")
+				if len(parts) >= 2 && parts[1] == "bridge" && parts[0] != "" {
+					fmt.Printf("    Using existing Incus network %q\n", parts[0])
+					_ = run("incus", "profile", "device", "set", "default", "eth0", "network="+parts[0])
+					return nil
+				}
+			}
+		}
+		if err := run("incus", "network", "create", "incusbr0", "ipv4.address=auto", "ipv4.nat=true", "ipv6.address=none"); err != nil {
+			return fmt.Errorf("create network incusbr0: %w", err)
+		}
+	}
+
+	_ = run("incus", "profile", "device", "add", "default", "eth0", "nic", "network=incusbr0", "name=eth0")
+	_ = run("incus", "profile", "device", "set", "default", "eth0", "network=incusbr0")
+	_ = run("incus", "profile", "device", "add", "default", "root", "disk", "path=/", "pool=default")
 	return nil
 }
 
