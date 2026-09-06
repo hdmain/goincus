@@ -1,7 +1,32 @@
-Origin: goincus
-Label: goincus
-Suite: stable
-Codename: stable
 Architectures: amd64 arm64
+Codename: stable
 Components: main
+Date: Sun, 06 Sep 2026 14:09:47 +0000
 Description: goincus packages
+Label: goincus
+Origin: goincus
+Suite: stable
+MD5Sum:
+ 444d792722a8270fc7d92cf0c7d36722             6430 Packages
+ 7f8b509802f2b247bd0ccccf7564322b             1436 Packages.gz
+ d1aaab35bf9ab2a44c66d463725d891c              174 Release
+ d41d8cd98f00b204e9800998ecf8427e                0 Translation-en
+ d89090949edea43f3cb7407c89a716b7               35 Translation-en.gz
+SHA1:
+ 47a3b49c7765fd85dbcb38bda8cc2dbbdc4fe8ec             6430 Packages
+ 18b393b2b2dd43c6ec2f0f33e6587d48e9aff601             1436 Packages.gz
+ 87a9834ee5c24ea566b8f7d874298ad76dc35aa3              174 Release
+ da39a3ee5e6b4b0d3255bfef95601890afd80709                0 Translation-en
+ 13b55eb7dfa82795c51119d4f2876c4fb1197229               35 Translation-en.gz
+SHA256:
+ 83568c5c9d59c1dfd92978bbf74d0f8c71554e6e9536be4b8eeaa9abe122d38e             6430 Packages
+ 8bf5d029897ab2c135120b286da322c6572ac6ffdc6c0e3d601ffd2da0976d86             1436 Packages.gz
+ 74a520294510196e3e8954d9e4188ab4d12aea99dbafcaa47c7574338e6c6108              174 Release
+ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855                0 Translation-en
+ b7fb2f46f46693a20fe412a28af387d5c6b0fa0154cbe576e9160c5464c8a989               35 Translation-en.gz
+SHA512:
+ 7d4f064b024cb86e83d6653bfdf81cb2f3ed3c4c246a6e932d2c007057b21b2bef85ef0b44aa49449034f8a7a0c2939b03e3915d3f9f258b16ab991099e91b4a             6430 Packages
+ e319fc4e6ec90bbd739d03ccfbd182413cc3d4831eb3227a3a5a4667fcc97079bb5034b8c751fa4347b0e47243b45b548c8e750b5e64a9dbfea12dba10d8c54d             1436 Packages.gz
+ d7ecd1bfee6af73965fcceac35d05add1465ceca84fe4db0800e201e74f2dc65cb68b83ad263b1a9cb4189d8ac69f266e62c9be82536a5045bae3f4eb143dc59              174 Release
+ cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e                0 Translation-en
+ 549f4115f6e6b77d1df2914681fc590cd33ae74aa4ea4633e6480570bb9cf2f15c77f4e059a1ec206d252134ea52dbb8da5acd387a54bfc801d3dba7dadc9877               35 Translation-en.gz
