@@ -2,23 +2,24 @@
 """Remove a proxy port mapping.
 
 Usage:
-  export GOINCUS_API_KEY=gic_...
-  python remove_port.py <instance-id> <port-id>
+  python remove_port.py <url> <api-key> <instance-id> <port-id>
 """
 
 from __future__ import annotations
 
 import sys
 
-from common import request
+from common import parse_conn
 
 
 def main() -> None:
-    if len(sys.argv) < 3:
-        print("usage: remove_port.py <instance-id> <port-id>", file=sys.stderr)
+    usage = "usage: remove_port.py <url> <api-key> <instance-id> <port-id>"
+    client, args = parse_conn(sys.argv[1:], usage)
+    if len(args) < 2:
+        print(usage, file=sys.stderr)
         sys.exit(2)
-    request("DELETE", f"/api/v1/instances/{sys.argv[1]}/ports/{sys.argv[2]}")
-    print(f"removed port {sys.argv[2]} from {sys.argv[1]}")
+    client.request("DELETE", f"/api/v1/instances/{args[0]}/ports/{args[1]}")
+    print(f"removed port {args[1]} from {args[0]}")
 
 
 if __name__ == "__main__":

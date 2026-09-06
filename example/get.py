@@ -2,22 +2,25 @@
 """Get one instance by id.
 
 Usage:
-  export GOINCUS_API_KEY=gic_...
-  python get.py <instance-id>
+  python get.py <url> <api-key> <instance-id>
 """
 
 from __future__ import annotations
 
 import sys
 
-from common import pretty, request
+from common import parse_conn, pretty
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("usage: get.py <instance-id>", file=sys.stderr)
+    client, args = parse_conn(
+        sys.argv[1:],
+        "usage: get.py <url> <api-key> <instance-id>",
+    )
+    if not args:
+        print("usage: get.py <url> <api-key> <instance-id>", file=sys.stderr)
         sys.exit(2)
-    pretty(request("GET", f"/api/v1/instances/{sys.argv[1]}"))
+    pretty(client.request("GET", f"/api/v1/instances/{args[0]}"))
 
 
 if __name__ == "__main__":

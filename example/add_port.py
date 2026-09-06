@@ -2,37 +2,35 @@
 """Add a proxy port mapping to an instance.
 
 Usage:
-  export GOINCUS_API_KEY=gic_...
-  python add_port.py <instance-id> <internal-port> [protocol] [host-port]
+  python add_port.py <url> <api-key> <instance-id> <internal-port> [protocol] [host-port]
 
 Examples:
-  python add_port.py <id> 443
-  python add_port.py <id> 8080 tcp 21080
+  python add_port.py http://127.0.0.1:9603 gic_xxx <id> 443
+  python add_port.py http://127.0.0.1:9603 gic_xxx <id> 8080 tcp 21080
 """
 
 from __future__ import annotations
 
 import sys
 
-from common import pretty, request
+from common import parse_conn, pretty
 
 
 def main() -> None:
-    if len(sys.argv) < 3:
-        print(
-            "usage: add_port.py <instance-id> <internal-port> [protocol] [host-port]",
-            file=sys.stderr,
-        )
+    usage = "usage: add_port.py <url> <api-key> <instance-id> <internal-port> [protocol] [host-port]"
+    client, args = parse_conn(sys.argv[1:], usage)
+    if len(args) < 2:
+        print(usage, file=sys.stderr)
         sys.exit(2)
 
     body: dict = {
-        "internal_port": int(sys.argv[2]),
-        "protocol": sys.argv[3] if len(sys.argv) > 3 else "tcp",
+        "internal_port": int(args[1]),
+        "protocol": args[2] if len(args) > 2 else "tcp",
     }
-    if len(sys.argv) > 4:
-        body["host_port"] = int(sys.argv[4])
+    if len(args) > 3:
+        body["host_port"] = int(args[3])
 
-    pretty(request("POST", f"/api/v1/instances/{sys.argv[1]}/ports", body))
+    pretty(client.request("POST", f"/api/v1/instances/{args[0]}/ports", body))
 
 
 if __name__ == "__main__":

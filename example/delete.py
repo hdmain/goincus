@@ -2,23 +2,26 @@
 """Delete an instance.
 
 Usage:
-  export GOINCUS_API_KEY=gic_...
-  python delete.py <instance-id>
+  python delete.py <url> <api-key> <instance-id>
 """
 
 from __future__ import annotations
 
 import sys
 
-from common import request
+from common import parse_conn
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("usage: delete.py <instance-id>", file=sys.stderr)
+    client, args = parse_conn(
+        sys.argv[1:],
+        "usage: delete.py <url> <api-key> <instance-id>",
+    )
+    if not args:
+        print("usage: delete.py <url> <api-key> <instance-id>", file=sys.stderr)
         sys.exit(2)
-    request("DELETE", f"/api/v1/instances/{sys.argv[1]}")
-    print(f"deleted {sys.argv[1]}")
+    client.request("DELETE", f"/api/v1/instances/{args[0]}")
+    print(f"deleted {args[0]}")
 
 
 if __name__ == "__main__":

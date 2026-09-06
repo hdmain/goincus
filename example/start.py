@@ -2,22 +2,25 @@
 """Start an instance.
 
 Usage:
-  export GOINCUS_API_KEY=gic_...
-  python start.py <instance-id>
+  python start.py <url> <api-key> <instance-id>
 """
 
 from __future__ import annotations
 
 import sys
 
-from common import pretty, request
+from common import parse_conn, pretty
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("usage: start.py <instance-id>", file=sys.stderr)
+    client, args = parse_conn(
+        sys.argv[1:],
+        "usage: start.py <url> <api-key> <instance-id>",
+    )
+    if not args:
+        print("usage: start.py <url> <api-key> <instance-id>", file=sys.stderr)
         sys.exit(2)
-    pretty(request("POST", f"/api/v1/instances/{sys.argv[1]}/start"))
+    pretty(client.request("POST", f"/api/v1/instances/{args[0]}/start"))
 
 
 if __name__ == "__main__":

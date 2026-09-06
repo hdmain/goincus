@@ -46,19 +46,16 @@ or `X-API-Key: <api_key>`.
 Python scripts in [`example/`](example/) (stdlib only):
 
 ```bash
-export GOINCUS_URL=http://127.0.0.1:9603
-export GOINCUS_API_KEY=gic_...
-
-python example/health.py
-python example/create.py web-1
-python example/list.py
-python example/get.py <id>
-python example/start.py <id>
-python example/stop.py <id>
-python example/restart.py <id>
-python example/add_port.py <id> 443
-python example/remove_port.py <id> <port-id>
-python example/delete.py <id>
+python example/health.py http://127.0.0.1:9603
+python example/create.py http://127.0.0.1:9603 gic_xxx web-1
+python example/list.py http://127.0.0.1:9603 gic_xxx
+python example/get.py http://127.0.0.1:9603 gic_xxx <id>
+python example/start.py http://127.0.0.1:9603 gic_xxx <id>
+python example/stop.py http://127.0.0.1:9603 gic_xxx <id>
+python example/restart.py http://127.0.0.1:9603 gic_xxx <id>
+python example/add_port.py http://127.0.0.1:9603 gic_xxx <id> 443
+python example/remove_port.py http://127.0.0.1:9603 gic_xxx <id> <port-id>
+python example/delete.py http://127.0.0.1:9603 gic_xxx <id>
 ```
 
 Or with curl:

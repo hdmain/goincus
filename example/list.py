@@ -2,17 +2,19 @@
 """List all instances.
 
 Usage:
-  export GOINCUS_API_KEY=gic_...
-  python list.py
+  python list.py <url> <api-key>
 """
 
 from __future__ import annotations
 
-from common import pretty, request
+import sys
+
+from common import parse_conn, pretty
 
 
 def main() -> None:
-    pretty(request("GET", "/api/v1/instances"))
+    client, _ = parse_conn(sys.argv[1:], "usage: list.py <url> <api-key>")
+    pretty(client.request("GET", "/api/v1/instances"))
 
 
 if __name__ == "__main__":

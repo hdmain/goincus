@@ -2,11 +2,10 @@
 """Create a NAT VPS instance.
 
 Usage:
-  export GOINCUS_API_KEY=gic_...
-  python create.py [name]
+  python create.py <url> <api-key> [name]
 
 Example:
-  python create.py web-1
+  python create.py http://127.0.0.1:9603 gic_xxx web-1
 """
 
 from __future__ import annotations
@@ -14,11 +13,15 @@ from __future__ import annotations
 import sys
 import time
 
-from common import pretty, request
+from common import parse_conn, pretty
 
 
 def main() -> None:
-    name = sys.argv[1] if len(sys.argv) > 1 else f"vps-{int(time.time())}"
+    client, args = parse_conn(
+        sys.argv[1:],
+        "usage: create.py <url> <api-key> [name]",
+    )
+    name = args[0] if args else f"vps-{int(time.time())}"
     body = {
         "name": name,
         "image": "ubuntu/24.04",
@@ -27,7 +30,7 @@ def main() -> None:
         "storage_gb": 10,
         "internal_ports": [22, 80],
     }
-    inst = request("POST", "/api/v1/instances", body)
+    inst = client.request("POST", "/api/v1/instances", body)
     pretty(inst)
     print(f"\ncreated id={inst['id']} status={inst['status']}", file=sys.stderr)
 
