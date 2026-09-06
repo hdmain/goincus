@@ -1,0 +1,212 @@
+name: packages
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+      - run: go test ./...
+
+  build-binaries:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            deb_arch: amd64
+            rpm_arch: x86_64
+          - goarch: arm64
+            deb_arch: arm64
+            rpm_arch: aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+      - name: Version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build binary
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags="-s -w -X main.version=${{ steps.ver.outputs.version }}" \
+            -o "dist/goincus-linux-${{ matrix.goarch }}" \
+            ./cmd/goincus
+      - name: Build .deb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev
+          bash packaging/build-deb.sh \
+            "${{ steps.ver.outputs.version }}" \
+            "${{ matrix.deb_arch }}" \
+            "dist/goincus-linux-${{ matrix.goarch }}" \
+            dist
+      - name: Build .rpm
+        run: |
+          sudo apt-get install -y rpm
+          bash packaging/build-rpm.sh \
+            "${{ steps.ver.outputs.version }}" \
+            "${{ matrix.rpm_arch }}" \
+            "dist/goincus-linux-${{ matrix.goarch }}" \
+            dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkgs-${{ matrix.goarch }}
+          path: |
+            dist/goincus-linux-${{ matrix.goarch }}
+            dist/*.deb
+            dist/*.rpm
+
+  publish:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/goincus-linux-amd64
+            artifacts/goincus-linux-arm64
+            artifacts/*.deb
+            artifacts/*.rpm
+          generate_release_notes: true
+
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+        continue-on-error: true
+
+      - name: Init gh-pages if missing
+        run: |
+          if [ ! -d gh-pages/.git ]; then
+            rm -rf gh-pages
+            mkdir gh-pages
+            cd gh-pages
+            git init
+            git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+            git checkout -b gh-pages
+          fi
+
+      - name: Install repo tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils createrepo-c
+
+      - name: Publish apt repo
+        run: |
+          mkdir -p gh-pages/pool/main
+          cp artifacts/*.deb gh-pages/pool/main/
+          cd gh-pages
+          dpkg-scanpackages --multiversion pool/ > Packages
+          gzip -k -f Packages
+          printf '%s\n' \
+            'Origin: goincus' \
+            'Label: goincus' \
+            'Suite: stable' \
+            'Codename: stable' \
+            'Architectures: amd64 arm64' \
+            'Components: main' \
+            'Description: goincus packages' \
+            > Release
+
+      - name: Publish dnf/yum repo
+        run: |
+          mkdir -p gh-pages/rpm
+          cp artifacts/*.rpm gh-pages/rpm/ || true
+          if ls gh-pages/rpm/*.rpm >/dev/null 2>&1; then
+            createrepo_c gh-pages/rpm
+          fi
+
+      - name: Write install page
+        run: |
+          cat > gh-pages/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8"/>
+            <title>goincus packages</title>
+            <style>
+              body{font-family:monospace;max-width:820px;margin:40px auto;background:#0d1117;color:#c9d1d9;line-height:1.5}
+              h1,h2{color:#58a6ff} pre{background:#161b22;padding:16px;border-radius:6px;overflow-x:auto}
+              a{color:#79c0ff}
+            </style>
+          </head>
+          <body>
+            <h1>goincus — Incus NAT VPS API</h1>
+            <p>Source: <a href="https://github.com/hdmain/goincus">github.com/hdmain/goincus</a></p>
+
+            <h2>Debian / Ubuntu (apt)</h2>
+            <pre>echo "deb [trusted=yes] https://hdmain.github.io/goincus ./" \
+    | sudo tee /etc/apt/sources.list.d/goincus.list
+          sudo apt update
+          sudo apt install goincus
+          sudo goincus init
+          sudo systemctl enable --now goincus</pre>
+
+            <h2>Fedora / AlmaLinux / CentOS (dnf)</h2>
+            <pre>sudo tee /etc/yum.repos.d/goincus.repo &lt;&lt;'REPO'
+          [goincus]
+          name=goincus
+          baseurl=https://hdmain.github.io/goincus/rpm
+          enabled=1
+          gpgcheck=0
+          REPO
+          sudo dnf install goincus
+          sudo goincus init
+          sudo systemctl enable --now goincus</pre>
+          </body>
+          </html>
+          EOF
+
+      - name: Commit & push gh-pages
+        run: |
+          cd gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "packages: deb rpm"
+          git push origin HEAD:gh-pages --force
+
+      - name: Ensure GitHub Pages source
+        run: |
+          gh api -X PUT "repos/${{ github.repository }}/pages" \
+            -f build_type=legacy \
+            -f source[branch]=gh-pages \
+            -f source[path]=/ \
+            || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
