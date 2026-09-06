@@ -91,12 +91,7 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	inst, err := s.svc.GetInstance(r.Context(), id)
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -105,12 +100,12 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeServiceError(w, err)
 		return
 	}
-	if err := s.svc.DeleteInstance(r.Context(), id); err != nil {
+	if err := s.svc.DeleteInstance(r.Context(), inst.ID); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -118,65 +113,65 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStartInstance(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	inst, err := s.svc.StartInstance(r.Context(), id)
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, inst)
+	out, err := s.svc.StartInstance(r.Context(), inst.ID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleStopInstance(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	inst, err := s.svc.StopInstance(r.Context(), id)
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, inst)
+	out, err := s.svc.StopInstance(r.Context(), inst.ID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleRestartInstance(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	inst, err := s.svc.RestartInstance(r.Context(), id)
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, inst)
+	out, err := s.svc.RestartInstance(r.Context(), inst.ID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleRepairInstance(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	inst, err := s.svc.RepairInstance(r.Context(), id)
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, inst)
+	out, err := s.svc.RepairInstance(r.Context(), inst.ID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleAddPort(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeServiceError(w, err)
 		return
 	}
 	var req models.AddPortRequest
@@ -184,7 +179,7 @@ func (s *Server) handleAddPort(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("invalid JSON body"))
 		return
 	}
-	pm, err := s.svc.AddPortMapping(r.Context(), id, req)
+	pm, err := s.svc.AddPortMapping(r.Context(), inst.ID, req)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -193,9 +188,9 @@ func (s *Server) handleAddPort(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemovePort(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeServiceError(w, err)
 		return
 	}
 	portID, err := uuid.Parse(chi.URLParam(r, "portID"))
@@ -203,19 +198,11 @@ func (s *Server) handleRemovePort(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("invalid port id"))
 		return
 	}
-	if err := s.svc.RemovePortMapping(r.Context(), id, portID); err != nil {
+	if err := s.svc.RemovePortMapping(r.Context(), inst.ID, portID); err != nil {
 		writeServiceError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func parseID(r *http.Request) (uuid.UUID, error) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		return uuid.Nil, errors.New("invalid instance id")
-	}
-	return id, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

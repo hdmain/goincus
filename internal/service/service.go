@@ -255,8 +255,21 @@ func (s *Service) ListInstances(ctx context.Context) ([]models.Instance, error) 
 	return list, nil
 }
 
-// GetInstance returns one instance by ID and refreshes status from Incus.
-func (s *Service) GetInstance(ctx context.Context, id uuid.UUID) (*models.Instance, error) {
+// ResolveInstance loads an instance by UUID or by name.
+func (s *Service) ResolveInstance(ctx context.Context, idOrName string) (*models.Instance, error) {
+	if id, err := uuid.Parse(idOrName); err == nil {
+		return s.GetInstance(ctx, id)
+	}
+	inst, err := s.store.GetInstanceByName(ctx, strings.ToLower(strings.TrimSpace(idOrName)))
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	s.syncStatusFromIncus(ctx, inst)
+	return inst, nil
+}
 	inst, err := s.store.GetInstance(ctx, id)
 	if err != nil {
 		if err == db.ErrNotFound {
