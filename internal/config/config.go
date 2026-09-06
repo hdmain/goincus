@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -237,7 +238,19 @@ func (c *Config) Validate() error {
 	if len(c.Auth.APIKeys) == 0 {
 		return fmt.Errorf("auth.api_keys must contain at least one key (run: goincus init)")
 	}
+	for _, key := range c.Auth.APIKeys {
+		if strings.Contains(key, "REPLACE_WITH") {
+			return fmt.Errorf("%s looks like a package template — run: sudo goincus init (do not overwrite an existing working config unless secrets were lost)", setupHintPath())
+		}
+	}
+	if strings.Contains(c.Database.Password, "REPLACE_WITH") || strings.Contains(c.Redis.Password, "REPLACE_WITH") {
+		return fmt.Errorf("%s has template passwords — apt upgrade used to overwrite this file; restore a backup or run: sudo goincus init --force", setupHintPath())
+	}
 	return nil
+}
+
+func setupHintPath() string {
+	return "/etc/goincus/config.yaml"
 }
 
 // ValidAPIKey reports whether key is configured.

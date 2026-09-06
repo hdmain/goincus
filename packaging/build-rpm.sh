@@ -16,7 +16,7 @@ trap 'rm -rf "${WORK}"' EXIT
 
 mkdir -p "${WORK}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 install -m 0755 "${BINARY}" "${WORK}/SOURCES/goincus"
-cp "${ROOT}/configs/config.yaml" "${WORK}/SOURCES/"
+cp "${ROOT}/configs/config.yaml" "${WORK}/SOURCES/config.yaml.example"
 cp "${ROOT}/deploy/systemd/goincus.service" "${WORK}/SOURCES/"
 cp "${ROOT}/migrations/"*.sql "${WORK}/SOURCES/"
 
@@ -42,15 +42,18 @@ mkdir -p %{buildroot}/etc/systemd/system
 mkdir -p %{buildroot}/opt/goincus
 mkdir -p %{buildroot}/var/log/goincus
 install -m 0755 %{_sourcedir}/goincus %{buildroot}/usr/local/bin/goincus
-install -m 0644 %{_sourcedir}/config.yaml %{buildroot}/etc/goincus/config.yaml
+install -m 0644 %{_sourcedir}/config.yaml.example %{buildroot}/usr/share/goincus/config.yaml.example
 install -m 0644 %{_sourcedir}/goincus.service %{buildroot}/etc/systemd/system/goincus.service
 install -m 0644 %{_sourcedir}/*.sql %{buildroot}/usr/share/goincus/migrations/
+printf '%s\\n' '# Live config is created by: sudo goincus init' > %{buildroot}/etc/goincus/.keep
 
 %files
 /usr/local/bin/goincus
-%config(noreplace) /etc/goincus/config.yaml
+/usr/share/goincus/config.yaml.example
+/etc/goincus/.keep
 /etc/systemd/system/goincus.service
 /usr/share/goincus/migrations/*
+%dir /etc/goincus
 %dir /opt/goincus
 %dir /var/log/goincus
 
@@ -58,7 +61,14 @@ install -m 0644 %{_sourcedir}/*.sql %{buildroot}/usr/share/goincus/migrations/
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
 fi
-echo "goincus installed. Next: sudo goincus init && sudo systemctl enable --now goincus"
+if [ ! -f /etc/goincus/config.yaml ]; then
+  echo "goincus: no config yet. Run: sudo goincus init && sudo systemctl enable --now goincus"
+else
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled goincus >/dev/null 2>&1; then
+    systemctl try-restart goincus >/dev/null 2>&1 || true
+  fi
+  echo "goincus upgraded. Config preserved at /etc/goincus/config.yaml"
+fi
 
 %preun
 if [ "\$1" = "0" ] && command -v systemctl >/dev/null 2>&1; then

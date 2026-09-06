@@ -22,9 +22,16 @@ mkdir -p \
   "${PKG_DIR}/var/log/goincus"
 
 install -m 0755 "${BINARY}" "${PKG_DIR}/usr/local/bin/goincus"
-install -m 0644 "${ROOT}/configs/config.yaml" "${PKG_DIR}/etc/goincus/config.yaml"
+# Never ship live /etc/goincus/config.yaml — apt upgrades would overwrite secrets.
+install -m 0644 "${ROOT}/configs/config.yaml" "${PKG_DIR}/usr/share/goincus/config.yaml.example"
 install -m 0644 "${ROOT}/deploy/systemd/goincus.service" "${PKG_DIR}/etc/systemd/system/goincus.service"
 install -m 0644 "${ROOT}/migrations/"*.sql "${PKG_DIR}/usr/share/goincus/migrations/"
+
+# Keep an empty config dir owned by root.
+cat > "${PKG_DIR}/etc/goincus/.keep" <<'EOF'
+# Live config is created by: sudo goincus init
+# Example template: /usr/share/goincus/config.yaml.example
+EOF
 
 cat > "${PKG_DIR}/DEBIAN/control" <<EOF
 Package: ${PKG_NAME}
@@ -44,17 +51,30 @@ EOF
 cat > "${PKG_DIR}/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl daemon-reload || true
-fi
-echo "goincus installed. Next: sudo goincus init && sudo systemctl enable --now goincus"
+case "$1" in
+  configure)
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl daemon-reload || true
+    fi
+    if [ ! -f /etc/goincus/config.yaml ]; then
+      echo "goincus: no config yet. Run: sudo goincus init && sudo systemctl enable --now goincus"
+    else
+      # Upgrade path: keep secrets; bounce service if it was enabled.
+      if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled goincus >/dev/null 2>&1; then
+        systemctl try-restart goincus >/dev/null 2>&1 || true
+      fi
+      echo "goincus upgraded. Config preserved at /etc/goincus/config.yaml"
+    fi
+    ;;
+esac
 EOF
 chmod 0755 "${PKG_DIR}/DEBIAN/postinst"
 
 cat > "${PKG_DIR}/DEBIAN/prerm" <<'EOF'
 #!/bin/sh
 set -e
-if command -v systemctl >/dev/null 2>&1; then
+# Only on full remove — never disable/stop permanently during apt upgrade.
+if [ "$1" = "remove" ] && command -v systemctl >/dev/null 2>&1; then
   systemctl stop goincus >/dev/null 2>&1 || true
   systemctl disable goincus >/dev/null 2>&1 || true
 fi
