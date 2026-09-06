@@ -1,0 +1,54 @@
+server:
+  host: "0.0.0.0"
+  port: 9603
+  read_timeout: 30s
+  write_timeout: 60s
+  idle_timeout: 120s
+
+# Prefer: sudo goincus init  (generates passwords + API keys automatically)
+auth:
+  api_keys:
+    - "REPLACE_WITH_goincus_init_GENERATED_KEY"
+
+database:
+  host: "127.0.0.1"
+  port: 9601
+  user: "goincus"
+  password: "REPLACE_WITH_GENERATED_PASSWORD"
+  name: "goincus"
+  sslmode: "disable"
+  max_conns: 25
+  min_conns: 2
+
+redis:
+  host: "127.0.0.1"
+  port: 9602
+  password: "REPLACE_WITH_GENERATED_PASSWORD"
+  db: 0
+  key_prefix: "goincus:"
+
+incus:
+  socket_path: ""
+  project: "default"
+  storage_pool: "default"
+  network: "incusbr0"
+  image_server: "https://images.linuxcontainers.org"
+  image_protocol: "simplestreams"
+  default_image: "ubuntu/24.04"
+  profiles:
+    - "default"
+    - "goincus-unprivileged"
+
+ports:
+  host_range_start: 20000
+  host_range_end: 29999
+  default_internal_ports:
+    - 22
+    - 80
+    - 443
+
+defaults:
+  cpu_cores: 1
+  memory_mb: 512
+  storage_gb: 10
+  processes: 512

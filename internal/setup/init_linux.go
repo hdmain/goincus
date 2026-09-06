@@ -1,0 +1,428 @@
+//go:build linux
+
+package setup
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/hdmain/goincus/internal/config"
+)
+
+// Run installs dependencies, configures them, and writes a generated config.
+func Run(opts Options) (*Result, error) {
+	if os.Geteuid() != 0 {
+		return nil, fmt.Errorf("goincus init must be run as root")
+	}
+
+	cfgPath := opts.ConfigPath
+	if cfgPath == "" {
+		cfgPath = DefaultConfigPath
+	}
+
+	if !opts.Force {
+		if _, err := os.Stat(cfgPath); err == nil {
+			return nil, fmt.Errorf("config already exists at %s (use --force to overwrite)", cfgPath)
+		}
+	}
+
+	cfg, err := config.GenerateInitialized()
+	if err != nil {
+		return nil, err
+	}
+
+	if !opts.SkipInstall {
+		fmt.Println("==> Installing PostgreSQL, Redis, and Incus (required)...")
+		if err := installDependencies(); err != nil {
+			return nil, fmt.Errorf("dependency install failed: %w", err)
+		}
+	} else {
+		fmt.Println("==> Skipping package install (--skip-install); verifying binaries...")
+		for _, bin := range []string{"psql", "redis-server", "incus"} {
+			if _, err := exec.LookPath(bin); err != nil {
+				return nil, fmt.Errorf("%s not found in PATH; install it or omit --skip-install", bin)
+			}
+		}
+	}
+
+	fmt.Println("==> Configuring PostgreSQL on 127.0.0.1:9601...")
+	if err := configurePostgreSQL(cfg); err != nil {
+		return nil, fmt.Errorf("configure postgresql: %w", err)
+	}
+
+	fmt.Println("==> Configuring Redis on 127.0.0.1:9602...")
+	if err := configureRedis(cfg); err != nil {
+		return nil, fmt.Errorf("configure redis: %w", err)
+	}
+
+	fmt.Println("==> Initializing Incus...")
+	if err := configureIncus(); err != nil {
+		return nil, fmt.Errorf("configure incus: %w", err)
+	}
+
+	fmt.Println("==> Writing config and installing service files...")
+	if err := config.Save(cfgPath, cfg); err != nil {
+		return nil, err
+	}
+	if err := installSupportFiles(); err != nil {
+		return nil, err
+	}
+
+	return &Result{
+		ConfigPath: cfgPath,
+		APIKeys:    append([]string(nil), cfg.Auth.APIKeys...),
+		DBPassword: cfg.Database.Password,
+		RedisPass:  cfg.Redis.Password,
+	}, nil
+}
+
+func installDependencies() error {
+	pm := detectPackageManager()
+	switch pm {
+	case "apt":
+		if err := runEnv(map[string]string{"DEBIAN_FRONTEND": "noninteractive"}, "apt-get", "update", "-y"); err != nil {
+			return err
+		}
+		if err := runEnv(map[string]string{"DEBIAN_FRONTEND": "noninteractive"},
+			"apt-get", "install", "-y", "postgresql", "postgresql-contrib", "redis-server", "curl", "gnupg", "ca-certificates"); err != nil {
+			return err
+		}
+		return installIncusZabbly()
+	case "dnf":
+		if err := run("dnf", "install", "-y", "postgresql-server", "postgresql", "redis", "curl", "gnupg2"); err != nil {
+			return err
+		}
+		_ = run("postgresql-setup", "--initdb")
+		return installIncusZabbly()
+	default:
+		return fmt.Errorf("unsupported package manager; install postgresql, redis-server, and incus, then re-run: goincus init --skip-install")
+	}
+}
+
+func installIncusZabbly() error {
+	if _, err := exec.LookPath("incus"); err == nil {
+		fmt.Println("    Incus already installed")
+		return nil
+	}
+
+	script := `
+set -euo pipefail
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkgs.zabbly.com/key.asc | gpg --dearmor -o /etc/apt/keyrings/zabbly.gpg
+. /etc/os-release
+arch="$(dpkg --print-architecture)"
+cat >/etc/apt/sources.list.d/zabbly-incus-stable.sources <<EOF
+Enabled: yes
+Types: deb
+URIs: https://pkgs.zabbly.com/incus/stable
+Suites: ${VERSION_CODENAME}
+Components: main
+Architectures: ${arch}
+Signed-By: /etc/apt/keyrings/zabbly.gpg
+EOF
+apt-get update -y
+DEBIAN_FRONTEND=noninteractive apt-get install -y incus
+`
+	if detectPackageManager() == "apt" {
+		if err := run("bash", "-c", script); err != nil {
+			return fmt.Errorf("install incus (zabbly): %w", err)
+		}
+		return nil
+	}
+
+	if err := run("bash", "-c", "curl -fsSL https://pkgs.zabbly.com/get/incus-stable | bash"); err != nil {
+		return fmt.Errorf("install incus: %w (see https://linuxcontainers.org/incus/docs/main/installing/)", err)
+	}
+	if _, err := exec.LookPath("incus"); err != nil {
+		return fmt.Errorf("incus binary missing after install")
+	}
+	return nil
+}
+
+func configurePostgreSQL(cfg *config.Config) error {
+	port := cfg.Database.Port
+	user := cfg.Database.User
+	pass := cfg.Database.Password
+	dbname := cfg.Database.Name
+
+	confDir := findPostgresConfDir()
+	if confDir == "" {
+		return fmt.Errorf("could not locate postgresql.conf directory")
+	}
+	dropIn := filepath.Join(confDir, "conf.d")
+	_ = os.MkdirAll(dropIn, 0o755)
+	content := fmt.Sprintf(`# Managed by goincus init
+listen_addresses = '127.0.0.1'
+port = %d
+password_encryption = scram-sha-256
+`, port)
+	if err := os.WriteFile(filepath.Join(dropIn, "goincus.conf"), []byte(content), 0o644); err != nil {
+		return err
+	}
+
+	hba := filepath.Join(confDir, "pg_hba.conf")
+	if data, err := os.ReadFile(hba); err == nil {
+		entry := "host    goincus         goincus         127.0.0.1/32            scram-sha-256\n"
+		if !strings.Contains(string(data), "goincus         goincus") {
+			_ = os.WriteFile(hba, append(data, []byte(entry)...), 0o640)
+		}
+	}
+
+	_ = run("systemctl", "enable", "--now", "postgresql")
+	_ = run("systemctl", "restart", "postgresql")
+	time.Sleep(2 * time.Second)
+
+	createRole := fmt.Sprintf(`DO $$ BEGIN
+  CREATE ROLE %s LOGIN PASSWORD '%s';
+EXCEPTION WHEN duplicate_object THEN
+  ALTER ROLE %s WITH PASSWORD '%s';
+END $$;`, user, escapeSQL(pass), user, escapeSQL(pass))
+	if err := runAsPostgres("psql", "-v", "ON_ERROR_STOP=1", "-c", createRole); err != nil {
+		return fmt.Errorf("create role: %w", err)
+	}
+
+	out, _ := outputAsPostgres("psql", "-tAc", fmt.Sprintf(`SELECT 1 FROM pg_database WHERE datname='%s'`, dbname))
+	if strings.TrimSpace(out) != "1" {
+		if err := runAsPostgres("psql", "-v", "ON_ERROR_STOP=1", "-c",
+			fmt.Sprintf(`CREATE DATABASE %s OWNER %s`, dbname, user)); err != nil {
+			return fmt.Errorf("create database: %w", err)
+		}
+	}
+	_ = runAsPostgres("psql", "-c", fmt.Sprintf(`GRANT ALL PRIVILEGES ON DATABASE %s TO %s`, dbname, user))
+	return nil
+}
+
+func configureRedis(cfg *config.Config) error {
+	conf := fmt.Sprintf(`# Managed by goincus init
+bind 127.0.0.1 -::1
+port %d
+protected-mode yes
+requirepass %s
+supervised systemd
+daemonize no
+`, cfg.Redis.Port, cfg.Redis.Password)
+
+	if err := os.MkdirAll("/etc/redis", 0o755); err != nil {
+		return err
+	}
+	dropPath := "/etc/redis/goincus.conf"
+	if err := os.WriteFile(dropPath, []byte(conf), 0o640); err != nil {
+		return err
+	}
+
+	for _, p := range []string{"/etc/redis/redis.conf", "/etc/redis.conf"} {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		if !strings.Contains(string(data), dropPath) {
+			_ = os.WriteFile(p, append(data, []byte("\ninclude "+dropPath+"\n")...), 0o644)
+		}
+		break
+	}
+
+	_ = run("systemctl", "enable", "--now", "redis-server")
+	_ = run("systemctl", "enable", "--now", "redis")
+	_ = run("systemctl", "restart", "redis-server")
+	_ = run("systemctl", "restart", "redis")
+	time.Sleep(1 * time.Second)
+	return nil
+}
+
+func configureIncus() error {
+	_ = run("systemctl", "enable", "--now", "incus")
+	_ = run("systemctl", "enable", "--now", "incus.service")
+
+	if err := run("incus", "info"); err == nil {
+		return nil
+	}
+
+	preseed := `config: {}
+networks:
+- config:
+    ipv4.address: auto
+    ipv6.address: none
+  description: ""
+  name: incusbr0
+  type: bridge
+storage_pools:
+- config: {}
+  description: ""
+  name: default
+  driver: dir
+profiles:
+- config: {}
+  description: ""
+  devices:
+    eth0:
+      name: eth0
+      network: incusbr0
+      type: nic
+    root:
+      path: /
+      pool: default
+      type: disk
+  name: default
+projects: []
+cluster: null
+`
+	cmd := exec.Command("incus", "admin", "init", "--preseed")
+	cmd.Stdin = strings.NewReader(preseed)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		cmd = exec.Command("incus", "init", "--preseed")
+		cmd.Stdin = strings.NewReader(preseed)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("incus init: %w", err)
+		}
+	}
+	return nil
+}
+
+func installSupportFiles() error {
+	if err := os.MkdirAll(MigrationsDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll("/var/log/goincus", 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll("/opt/goincus", 0o755); err != nil {
+		return err
+	}
+
+	if self, err := os.Executable(); err == nil {
+		_ = run("install", "-m", "0755", self, DefaultBinaryPath)
+	}
+
+	unit := `[Unit]
+Description=goincus — Incus NAT VPS provisioning API
+Documentation=https://github.com/hdmain/goincus
+After=network-online.target postgresql.service redis-server.service redis.service incus.service
+Wants=network-online.target
+Requires=incus.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/goincus
+ExecStart=/usr/local/bin/goincus serve -config /etc/goincus/config.yaml -migrations /usr/share/goincus/migrations
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/incus /run/incus /var/log/goincus /etc/goincus
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=goincus
+
+[Install]
+WantedBy=multi-user.target
+`
+	if err := os.WriteFile(DefaultUnitPath, []byte(unit), 0o644); err != nil {
+		return err
+	}
+	_ = run("systemctl", "daemon-reload")
+	return WriteEmbeddedMigrations(MigrationsDir)
+}
+
+func detectPackageManager() string {
+	if _, err := exec.LookPath("apt-get"); err == nil {
+		return "apt"
+	}
+	if _, err := exec.LookPath("dnf"); err == nil {
+		return "dnf"
+	}
+	return ""
+}
+
+func findPostgresConfDir() string {
+	base := "/etc/postgresql"
+	entries, err := os.ReadDir(base)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			main := filepath.Join(base, e.Name(), "main")
+			if _, err := os.Stat(filepath.Join(main, "postgresql.conf")); err == nil {
+				return main
+			}
+		}
+	}
+	for _, p := range []string{"/var/lib/pgsql/data", "/var/lib/postgresql/data"} {
+		if _, err := os.Stat(filepath.Join(p, "postgresql.conf")); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func escapeSQL(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
+func run(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func runEnv(env map[string]string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Env = os.Environ()
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func runAsPostgres(name string, args ...string) error {
+	cmd := exec.Command("runuser", "-u", "postgres", "--", name)
+	cmd.Args = append(cmd.Args, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
+	quoted := shellQuoteAll(args)
+	cmd = exec.Command("su", "-", "postgres", "-c", name+" "+strings.Join(quoted, " "))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func outputAsPostgres(name string, args ...string) (string, error) {
+	cmd := exec.Command("runuser", "-u", "postgres", "--", name)
+	cmd.Args = append(cmd.Args, args...)
+	out, err := cmd.Output()
+	if err == nil {
+		return string(out), nil
+	}
+	quoted := shellQuoteAll(args)
+	cmd = exec.Command("su", "-", "postgres", "-c", name+" "+strings.Join(quoted, " "))
+	out, err = cmd.Output()
+	return string(out), err
+}
+
+func shellQuoteAll(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	return out
+}

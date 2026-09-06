@@ -1,0 +1,79 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+      - name: Test
+        run: go test ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "dist/goincus-${{ matrix.goos }}-${{ matrix.goarch }}" \
+            ./cmd/goincus
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: goincus-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/goincus-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create checksums
+        run: |
+          cd artifacts
+          sha256sum goincus-* > SHA256SUMS
+          ls -la
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/goincus-linux-amd64
+            artifacts/goincus-linux-arm64
+            artifacts/SHA256SUMS
+          generate_release_notes: true

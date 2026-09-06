@@ -1,0 +1,34 @@
+[Unit]
+Description=goincus — Incus NAT VPS provisioning API
+Documentation=https://github.com/hdmain/goincus
+After=network-online.target postgresql.service redis-server.service redis.service incus.service
+Wants=network-online.target
+Requires=incus.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/goincus
+
+ExecStart=/usr/local/bin/goincus serve \
+  -config /etc/goincus/config.yaml \
+  -migrations /usr/share/goincus/migrations
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/incus /run/incus /var/log/goincus /etc/goincus
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=goincus
+
+[Install]
+WantedBy=multi-user.target
