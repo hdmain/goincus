@@ -138,6 +138,9 @@ jobs:
           cd gh-pages
           dpkg-scanpackages --multiversion pool/ > Packages
           gzip -k -f Packages
+          # Silence apt Translation-en 404 noise for this flat repo.
+          : > Translation-en
+          gzip -k -f Translation-en
           printf '%s\n' \
             'Origin: goincus' \
             'Label: goincus' \

@@ -42,6 +42,7 @@ func Connect(cfg config.IncusConfig) (*Client, error) {
 	if err := c.EnsureInfrastructure(); err != nil {
 		return nil, err
 	}
+	_ = EnsureHostOpenSSHDebs() // best-effort warm cache for offline guest installs
 	return c, nil
 }
 
@@ -133,6 +134,7 @@ func (c *Client) EnsureNetwork() (string, error) {
 	}
 
 	if _, _, err := c.server.GetNetwork(wanted); err == nil {
+		_ = c.HardenNetwork(wanted)
 		return wanted, nil
 	}
 
@@ -141,11 +143,13 @@ func (c *Client) EnsureNetwork() (string, error) {
 	if err == nil {
 		for _, n := range networks {
 			if n.Type == "bridge" && n.Managed {
+				_ = c.HardenNetwork(n.Name)
 				return n.Name, nil
 			}
 		}
 		for _, n := range networks {
 			if n.Managed {
+				_ = c.HardenNetwork(n.Name)
 				return n.Name, nil
 			}
 		}
@@ -159,6 +163,8 @@ func (c *Client) EnsureNetwork() (string, error) {
 			Config: map[string]string{
 				"ipv4.address": "auto",
 				"ipv4.nat":     "true",
+				"ipv4.dhcp":    "true",
+				"dns.mode":     "managed",
 				"ipv6.address": "none",
 			},
 		},
@@ -166,6 +172,7 @@ func (c *Client) EnsureNetwork() (string, error) {
 	if err := c.server.CreateNetwork(req); err != nil {
 		return "", fmt.Errorf("create network %q: %w", wanted, err)
 	}
+	_ = c.HardenNetwork(wanted)
 	return wanted, nil
 }
 

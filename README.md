@@ -7,7 +7,7 @@ REST API for provisioning and lifecycle-managing isolated LXC containers as NAT 
 ### Debian / Ubuntu (apt)
 
 ```bash
-echo "deb [trusted=yes] https://hdmain.github.io/goincus ./" \
+echo "deb [trusted=yes lang=none] https://hdmain.github.io/goincus ./" \
   | sudo tee /etc/apt/sources.list.d/goincus.list
 sudo apt update
 sudo apt install goincus

@@ -21,38 +21,38 @@ packages:
   - openssh-server
 ssh_pwauth: true
 disable_root: false
+manage_resolv_conf: true
+resolv_conf:
+  nameservers: ['1.1.1.1', '8.8.8.8']
 runcmd:
   - [ bash, -lc, "PASS=$(echo '%s' | base64 -d); echo root:$PASS | chpasswd" ]
   - [ bash, -lc, "ssh-keygen -A" ]
-  - [ bash, -lc, "mkdir -p /etc/ssh/sshd_config.d; printf '%%s\\n' 'PermitRootLogin yes' 'PasswordAuthentication yes' 'ListenAddress 0.0.0.0' 'ListenAddress 127.0.0.1' > /etc/ssh/sshd_config.d/99-goincus.conf" ]
+  - [ bash, -lc, "mkdir -p /etc/ssh/sshd_config.d; printf '%%s\\n' 'PermitRootLogin yes' 'PasswordAuthentication yes' 'AddressFamily inet' 'ListenAddress 0.0.0.0' 'ListenAddress 127.0.0.1' > /etc/ssh/sshd_config.d/99-goincus.conf" ]
   - [ bash, -lc, "systemctl disable --now ssh.socket 2>/dev/null || true; systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true; systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true" ]
 `, b64)
 }
 
 // EnsureSSH installs/configures OpenSSH inside a running container and sets the root password.
-// It fails unless TCP/22 is confirmed listening afterward.
+// It prefers apt when the guest has DNS, otherwise installs .debs pushed from the host.
 func (c *Client) EnsureSSH(name, rootPassword string) error {
 	if rootPassword == "" {
 		return fmt.Errorf("root password is empty")
 	}
+
+	_ = c.ConfigureGuestDNS(name)
+
+	// Try network install first; fall back to host-pushed packages (guest DNS often broken).
+	aptErr := c.installOpenSSHViaApt(name)
+	if aptErr != nil {
+		if pushErr := c.InstallOpenSSHFromHost(name); pushErr != nil {
+			return fmt.Errorf("install openssh (apt: %v; host-debs: %w)", aptErr, pushErr)
+		}
+	}
+
 	b64 := base64.StdEncoding.EncodeToString([]byte(rootPassword))
 	script := fmt.Sprintf(`set -eux
-export DEBIAN_FRONTEND=noninteractive
-if command -v apt-get >/dev/null 2>&1; then
-  apt-get update -y
-  apt-get install -y openssh-server openssh-client iproute2
-elif command -v dnf >/dev/null 2>&1; then
-  dnf install -y openssh-server iproute
-elif command -v apk >/dev/null 2>&1; then
-  apk add --no-cache openssh openssh-server iproute2
-else
-  echo "no supported package manager" >&2
-  exit 1
-fi
-
 PASS="$(echo '%s' | base64 -d)"
 echo "root:${PASS}" | chpasswd
-
 ssh-keygen -A
 mkdir -p /etc/ssh/sshd_config.d /run/sshd
 cat > /etc/ssh/sshd_config.d/99-goincus.conf <<'EOF'
@@ -64,23 +64,16 @@ AddressFamily inet
 ListenAddress 0.0.0.0
 ListenAddress 127.0.0.1
 EOF
-
 systemctl disable --now ssh.socket 2>/dev/null || true
 systemctl disable --now sshd.socket 2>/dev/null || true
 systemctl unmask ssh 2>/dev/null || true
 systemctl unmask sshd 2>/dev/null || true
 systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
-systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || service ssh restart || service sshd restart
-
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || /usr/sbin/sshd || true
 sshd -t || /usr/sbin/sshd -t || true
 for i in $(seq 1 30); do
   if ss -ltn | grep -E '[:.]22[[:space:]]' >/dev/null 2>&1; then
     ss -ltn | grep -E '[:.]22[[:space:]]' || true
-    # Prove local accept works (proxy connects to 127.0.0.1).
-    if command -v timeout >/dev/null 2>&1; then
-      timeout 2 bash -c 'echo | openssl s_client -connect 127.0.0.1:22 2>/dev/null | head -1' >/dev/null 2>&1 || \
-      timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/22 && head -1 <&3' | grep -qi SSH || true
-    fi
     exit 0
   fi
   if [ "$i" = "5" ] || [ "$i" = "15" ]; then
@@ -91,19 +84,44 @@ done
 echo "sshd failed to listen on :22" >&2
 ss -ltn || true
 systemctl status ssh --no-pager || systemctl status sshd --no-pager || true
-journalctl -u ssh -u sshd -n 50 --no-pager || true
 exit 1
 `, b64)
 
 	stdout, stderr, code, err := c.exec(name, script)
 	if err != nil {
-		return fmt.Errorf("exec ensure ssh: %w; stderr=%s stdout=%s", err, stderr, stdout)
+		return fmt.Errorf("configure ssh: %w; stderr=%s stdout=%s", err, stderr, stdout)
 	}
 	if code != 0 {
-		return fmt.Errorf("ensure ssh exited %d; stderr=%s stdout=%s", code, stderr, stdout)
+		return fmt.Errorf("configure ssh exited %d; stderr=%s stdout=%s", code, stderr, stdout)
 	}
 	if err := c.WaitForSSHD(name, 90*time.Second); err != nil {
-		return fmt.Errorf("%w; last ensure stdout=%s stderr=%s", err, stdout, stderr)
+		return fmt.Errorf("%w; last configure stdout=%s stderr=%s", err, stdout, stderr)
+	}
+	return nil
+}
+
+func (c *Client) installOpenSSHViaApt(name string) error {
+	stdout, stderr, code, err := c.exec(name, `
+set -eux
+export DEBIAN_FRONTEND=noninteractive
+getent hosts archive.ubuntu.com >/dev/null || getent hosts deb.debian.org >/dev/null
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get update -y
+  apt-get install -y openssh-server openssh-client iproute2
+elif command -v dnf >/dev/null 2>&1; then
+  dnf install -y openssh-server iproute
+elif command -v apk >/dev/null 2>&1; then
+  apk add --no-cache openssh openssh-server iproute2
+else
+  exit 1
+fi
+command -v sshd >/dev/null || test -x /usr/sbin/sshd
+`)
+	if err != nil {
+		return fmt.Errorf("%w (%s %s)", err, stdout, stderr)
+	}
+	if code != 0 {
+		return fmt.Errorf("exit %d (%s %s)", code, stdout, stderr)
 	}
 	return nil
 }
@@ -172,8 +190,12 @@ func (c *Client) AllocateContainerIPv4() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse network cidr %q: %w", cidr, err)
 	}
+	_ = ip
 
-	used := map[string]struct{}{ip.String(): {}}
+	used := map[string]struct{}{}
+	if gw, _, err := parseHostFromCIDR(cidr); err == nil {
+		used[gw] = struct{}{}
+	}
 	leases, err := c.server.GetNetworkLeases(netName)
 	if err == nil {
 		for _, l := range leases {
@@ -185,22 +207,15 @@ func (c *Client) AllocateContainerIPv4() (string, error) {
 	instances, err := c.server.GetInstances(api.InstanceTypeAny)
 	if err == nil {
 		for _, inst := range instances {
-			for _, dev := range inst.Devices {
-				if dev["type"] != "nic" {
-					continue
-				}
-				addr := strings.Split(dev["ipv4.address"], "/")[0]
-				if addr != "" {
-					used[addr] = struct{}{}
-				}
-			}
-			for _, dev := range inst.ExpandedDevices {
-				if dev["type"] != "nic" {
-					continue
-				}
-				addr := strings.Split(dev["ipv4.address"], "/")[0]
-				if addr != "" {
-					used[addr] = struct{}{}
+			for _, devices := range []map[string]map[string]string{inst.Devices, inst.ExpandedDevices} {
+				for _, dev := range devices {
+					if dev["type"] != "nic" {
+						continue
+					}
+					addr := strings.Split(dev["ipv4.address"], "/")[0]
+					if addr != "" {
+						used[addr] = struct{}{}
+					}
 				}
 			}
 		}
@@ -208,7 +223,7 @@ func (c *Client) AllocateContainerIPv4() (string, error) {
 
 	base := ipNet.IP.To4()
 	if base == nil {
-		return "", fmt.Errorf("not ipv4: %s", ip)
+		return "", fmt.Errorf("not ipv4 network: %s", cidr)
 	}
 	ones, bits := ipNet.Mask.Size()
 	if bits != 32 || ones >= 30 {
@@ -225,11 +240,4 @@ func (c *Client) AllocateContainerIPv4() (string, error) {
 		return cand, nil
 	}
 	return "", fmt.Errorf("no free ipv4 addresses on %s", netName)
-}
-
-func maskToUint(mask net.IPMask) uint32 {
-	if len(mask) != 4 {
-		return 0
-	}
-	return uint32(mask[0])<<24 | uint32(mask[1])<<16 | uint32(mask[2])<<8 | uint32(mask[3])
 }

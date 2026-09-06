@@ -223,6 +223,10 @@ func (s *Service) bootstrapSSH(ctx context.Context, inst *models.Instance) error
 			return fmt.Errorf("persist root password: %w", err)
 		}
 	}
+	if netName := s.cfg.Incus.Network; netName != "" {
+		_ = s.incus.HardenNetwork(netName)
+	}
+	_ = s.incus.ConfigureGuestDNS(inst.IncusName)
 	if err := s.incus.EnsureSSH(inst.IncusName, pass); err != nil {
 		return fmt.Errorf("bootstrap ssh: %w", err)
 	}
