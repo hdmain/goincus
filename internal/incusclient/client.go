@@ -36,6 +36,9 @@ func Connect(cfg config.IncusConfig) (*Client, error) {
 	}
 
 	c := &Client{server: server, cfg: cfg}
+	if err := EnsureHostIsolation(); err != nil {
+		return nil, err
+	}
 	if err := c.EnsureUnprivilegedProfile(); err != nil {
 		return nil, err
 	}
@@ -152,45 +155,6 @@ func (c *Client) EnsureNetwork() (string, error) {
 	return wanted, nil
 }
 
-// EnsureUnprivilegedProfile creates or updates the hardened security profile.
-// Unprivileged containers with nesting disabled reduce escape surface.
-func (c *Client) EnsureUnprivilegedProfile() error {
-	profile := api.ProfilesPost{
-		Name: UnprivilegedProfile,
-		ProfilePut: api.ProfilePut{
-			Description: "goincus hardened unprivileged profile — blocks common container escape vectors",
-			Config: map[string]string{
-				"security.privileged": "false",
-				"security.nesting":    "false",
-				// Isolated idmaps often break starts when host subuid/subgid ranges are tight.
-				"security.idmap.isolated": "false",
-			},
-			Devices: map[string]map[string]string{},
-		},
-	}
-
-	existing, etag, err := c.server.GetProfile(UnprivilegedProfile)
-	if err != nil {
-		return c.server.CreateProfile(profile)
-	}
-
-	existing.Description = profile.Description
-	if existing.Config == nil {
-		existing.Config = map[string]string{}
-	}
-	for k, v := range profile.Config {
-		existing.Config[k] = v
-	}
-	// Drop keys that previously caused start failures on some hosts.
-	delete(existing.Config, "limits.kernel.pid_max")
-	delete(existing.Config, "security.syscalls.intercept.mknod")
-	delete(existing.Config, "security.syscalls.intercept.setxattr")
-	delete(existing.Config, "security.syscalls.intercept.sysinfo")
-	delete(existing.Config, "security.syscalls.intercept.mount")
-	delete(existing.Config, "security.syscalls.intercept.sched_setscheduler")
-	return c.server.UpdateProfile(UnprivilegedProfile, existing.Writable(), etag)
-}
-
 // CreateArgs describes a new NAT VPS container.
 type CreateArgs struct {
 	Name         string
@@ -218,23 +182,18 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 	if len(profiles) == 0 {
 		profiles = c.cfg.Profiles
 	}
-	profiles = c.filterAvailableProfiles(profiles)
+	profiles = sanitizeProfiles(c.filterAvailableProfiles(profiles))
 
-	cfg := ResourceConfig(args.CPUCores, args.MemoryMB, args.Processes)
+	cfg := mergeConfig(HardenedInstanceConfig(), ResourceConfig(args.CPUCores, args.MemoryMB, args.Processes))
 	if args.RootPassword != "" {
 		cfg["cloud-init.user-data"] = CloudInitUserData(args.RootPassword)
 	}
 
-	eth0 := map[string]string{
-		"type":    "nic",
-		"network": c.cfg.Network,
-		"name":    "eth0",
-	}
 	ip, err := c.AllocateContainerIPv4()
 	if err != nil {
 		return fmt.Errorf("allocate static ipv4: %w", err)
 	}
-	eth0["ipv4.address"] = ip
+	eth0 := HardenedNIC(c.cfg.Network, ip)
 
 	req := api.InstancesPost{
 		Name: args.Name,
@@ -257,10 +216,18 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 
 	op, err := c.server.CreateInstance(req)
 	if err != nil {
-		return fmt.Errorf("create instance: %w", err)
+		// Older Incus builds may lack port_isolation — retry without it.
+		if strings.Contains(err.Error(), "port_isolation") || strings.Contains(err.Error(), "Invalid device") {
+			delete(eth0, "security.port_isolation")
+			req.Devices["eth0"] = eth0
+			op, err = c.server.CreateInstance(req)
+		}
+		if err != nil {
+			return IsolationError(fmt.Errorf("create instance: %w", err))
+		}
 	}
 	if err := op.Wait(); err != nil {
-		return fmt.Errorf("wait create instance: %w", err)
+		return IsolationError(fmt.Errorf("wait create instance: %w", err))
 	}
 	return nil
 }
@@ -287,8 +254,6 @@ func ResourceConfig(cpuCores, memoryMB, processes int) map[string]string {
 		"limits.memory":        fmt.Sprintf("%dMiB", memoryMB),
 		"limits.memory.swap":   "false",
 		"limits.processes":     strconv.Itoa(processes),
-		"security.privileged":  "false",
-		"security.nesting":     "false",
 	}
 }
 

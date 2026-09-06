@@ -60,6 +60,19 @@ Package upgrades do **not** overwrite `/etc/goincus/config.yaml` (template lives
 
 Disk size (`storage_gb`) is enforced on the `goincus` storage pool (ZFS/LVM preferred). With the old `dir` pool, `df` inside the guest shows the **host** disk — recreate instances after upgrading so they land on the quota-capable pool.
 
+## Guest isolation
+
+Each VPS is an **unprivileged** Incus container with:
+
+- no privileged mode, no nesting (cannot run nested containers/Docker that need it)
+- isolated UID/GID map per instance (`security.idmap.isolated`)
+- Incus guest API disabled (`/dev/incus` not exposed)
+- default seccomp deny + no syscall intercept helpers
+- NIC MAC/IPv4/IPv6 filtering and bridge port isolation (no guest↔guest)
+- host sysctl hardening (`/etc/sysctl.d/99-goincus-isolation.conf`)
+
+Residual risk: all containers share the host kernel — a kernel 0-day can still escape. For stronger isolation use VMs/microVMs.
+
 ## SSH access
 
 New instances get OpenSSH installed automatically and a generated `root_password`

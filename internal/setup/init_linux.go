@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hdmain/goincus/internal/config"
+	"github.com/hdmain/goincus/internal/incusclient"
 )
 
 // Run installs dependencies, configures them, and writes a generated config.
@@ -90,6 +91,7 @@ func Run(opts Options) (*Result, error) {
 	if err := configureIncus(); err != nil {
 		return nil, fmt.Errorf("configure incus: %w", err)
 	}
+	_ = incusclient.EnsureHostIsolation()
 
 	fmt.Println("==> Writing config and installing service files...")
 	if err := config.Save(cfgPath, cfg); err != nil {

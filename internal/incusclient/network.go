@@ -225,14 +225,6 @@ func (c *Client) EnsureInstanceIPv4(name string) (string, error) {
 			}
 		}
 	}
-	eth0["type"] = "nic"
-	if eth0["network"] == "" {
-		eth0["network"] = c.cfg.Network
-	}
-	if eth0["name"] == "" {
-		eth0["name"] = "eth0"
-	}
-
 	ip := strings.Split(strings.TrimSpace(eth0["ipv4.address"]), "/")[0]
 	needUpdate := !hadDevice
 	if ip == "" || net.ParseIP(ip) == nil {
@@ -241,15 +233,24 @@ func (c *Client) EnsureInstanceIPv4(name string) (string, error) {
 			return "", err
 		}
 		ip = allocated
-		eth0["ipv4.address"] = ip
 		needUpdate = true
-	} else {
-		eth0["ipv4.address"] = ip
+	}
+	hardened := HardenedNIC(c.cfg.Network, ip)
+	for k, v := range hardened {
+		if eth0[k] != v {
+			needUpdate = true
+		}
+		eth0[k] = v
 	}
 
 	if needUpdate {
 		inst.Devices["eth0"] = eth0
 		op, err := c.server.UpdateInstance(name, inst.Writable(), etag)
+		if err != nil {
+			delete(eth0, "security.port_isolation")
+			inst.Devices["eth0"] = eth0
+			op, err = c.server.UpdateInstance(name, inst.Writable(), etag)
+		}
 		if err != nil {
 			return "", fmt.Errorf("set eth0 ipv4.address: %w", err)
 		}
