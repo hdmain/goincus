@@ -233,7 +233,10 @@ ip -4 addr flush dev "$IFACE" || true
 ip addr add "$IP/$MASK" dev "$IFACE" || ip addr replace "$IP/$MASK" dev "$IFACE"
 ip route replace default via "$GW" dev "$IFACE" || true
 
+# resolv.conf is often a symlink into /run/systemd/resolve (missing early in boot).
 umount /etc/resolv.conf 2>/dev/null || true
+rm -f /etc/resolv.conf
+mkdir -p /etc /run/systemd/resolve
 printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver %%s\n' "$GW" > /etc/resolv.conf
 
 if command -v netplan >/dev/null 2>&1 || [ -d /etc/netplan ]; then
