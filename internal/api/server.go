@@ -50,6 +50,7 @@ func (s *Server) Router() http.Handler {
 				r.Post("/start", s.handleStartInstance)
 				r.Post("/stop", s.handleStopInstance)
 				r.Post("/restart", s.handleRestartInstance)
+				r.Post("/repair", s.handleRepairInstance)
 				r.Post("/ports", s.handleAddPort)
 				r.Delete("/ports/{portID}", s.handleRemovePort)
 			})
@@ -151,6 +152,20 @@ func (s *Server) handleRestartInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inst, err := s.svc.RestartInstance(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, inst)
+}
+
+func (s *Server) handleRepairInstance(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	inst, err := s.svc.RepairInstance(r.Context(), id)
 	if err != nil {
 		writeServiceError(w, err)
 		return

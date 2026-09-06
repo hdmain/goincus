@@ -53,6 +53,7 @@ python example/get.py http://127.0.0.1:9603 gic_xxx <id>
 python example/start.py http://127.0.0.1:9603 gic_xxx <id>
 python example/stop.py http://127.0.0.1:9603 gic_xxx <id>
 python example/restart.py http://127.0.0.1:9603 gic_xxx <id>
+python example/repair.py http://127.0.0.1:9603 gic_xxx <id>
 python example/add_port.py http://127.0.0.1:9603 gic_xxx <id> 443
 python example/remove_port.py http://127.0.0.1:9603 gic_xxx <id> <port-id>
 python example/delete.py http://127.0.0.1:9603 gic_xxx <id>

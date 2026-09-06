@@ -164,7 +164,7 @@ func (s *Service) CreateInstance(ctx context.Context, req models.CreateInstanceR
 func (s *Service) provision(ctx context.Context, inst *models.Instance, internalPorts []int) {
 	_ = s.store.UpdateInstanceStatus(ctx, inst.ID, models.StatusCreating, "")
 
-	err := s.incus.CreateContainer(incusclient.CreateArgs{
+	if err := s.incus.CreateContainer(incusclient.CreateArgs{
 		Name:      inst.IncusName,
 		Image:     inst.Image,
 		CPUCores:  inst.CPUCores,
@@ -172,30 +172,51 @@ func (s *Service) provision(ctx context.Context, inst *models.Instance, internal
 		StorageGB: inst.StorageGB,
 		Processes: inst.Processes,
 		Profiles:  s.cfg.Incus.Profiles,
-	})
-	if err != nil {
+	}); err != nil {
 		s.fail(ctx, inst.ID, fmt.Errorf("create container: %w", err))
 		return
 	}
 
-	if err := s.incus.StartContainer(inst.IncusName); err != nil {
+	if err := s.incus.EnsureStarted(inst.IncusName); err != nil {
 		s.fail(ctx, inst.ID, fmt.Errorf("start container: %w", err))
 		return
 	}
 
-	var mappings []models.PortMapping
+	if err := s.ensureDefaultPorts(ctx, inst, internalPorts); err != nil {
+		s.fail(ctx, inst.ID, err)
+		return
+	}
+
+	if err := s.store.UpdateInstanceStatus(ctx, inst.ID, models.StatusRunning, ""); err != nil {
+		s.logger.Error("update status running", "id", inst.ID, "err", err)
+	}
+	_ = s.redis.SetInstanceState(ctx, inst.ID.String(), string(models.StatusRunning), 24*time.Hour)
+	s.logger.Info("instance provisioned", "id", inst.ID, "incus", inst.IncusName)
+}
+
+func (s *Service) ensureDefaultPorts(ctx context.Context, inst *models.Instance, internalPorts []int) error {
+	existing, err := s.store.ListPorts(ctx, inst.ID)
+	if err != nil {
+		return fmt.Errorf("list ports: %w", err)
+	}
+	have := map[int]struct{}{}
+	for _, p := range existing {
+		have[p.InternalPort] = struct{}{}
+	}
+
 	for _, internal := range internalPorts {
+		if _, ok := have[internal]; ok {
+			continue
+		}
 		hostPort, err := s.ports.Allocate(ctx)
 		if err != nil {
-			s.fail(ctx, inst.ID, fmt.Errorf("allocate port for %d: %w", internal, err))
-			return
+			return fmt.Errorf("allocate port for %d: %w", internal, err)
 		}
 
 		device := fmt.Sprintf("proxy-%d", internal)
 		if err := s.incus.AddProxyDevice(inst.IncusName, device, "tcp", hostPort, internal); err != nil {
 			_ = s.ports.Release(ctx, hostPort)
-			s.fail(ctx, inst.ID, fmt.Errorf("proxy device %s: %w", device, err))
-			return
+			return fmt.Errorf("proxy device %s: %w", device, err)
 		}
 
 		pm := models.PortMapping{
@@ -210,17 +231,10 @@ func (s *Service) provision(ctx context.Context, inst *models.Instance, internal
 		if err := s.store.AddPort(ctx, &pm); err != nil {
 			_ = s.incus.RemoveProxyDevice(inst.IncusName, device)
 			_ = s.ports.Release(ctx, hostPort)
-			s.fail(ctx, inst.ID, fmt.Errorf("persist port: %w", err))
-			return
+			return fmt.Errorf("persist port: %w", err)
 		}
-		mappings = append(mappings, pm)
 	}
-
-	if err := s.store.UpdateInstanceStatus(ctx, inst.ID, models.StatusRunning, ""); err != nil {
-		s.logger.Error("update status running", "id", inst.ID, "err", err)
-	}
-	_ = s.redis.SetInstanceState(ctx, inst.ID.String(), string(models.StatusRunning), 24*time.Hour)
-	s.logger.Info("instance provisioned", "id", inst.ID, "incus", inst.IncusName, "ports", len(mappings))
+	return nil
 }
 
 func (s *Service) fail(ctx context.Context, id uuid.UUID, cause error) {
@@ -229,12 +243,19 @@ func (s *Service) fail(ctx context.Context, id uuid.UUID, cause error) {
 	_ = s.redis.SetInstanceState(ctx, id.String(), string(models.StatusError), time.Hour)
 }
 
-// ListInstances returns all active instances.
+// ListInstances returns all active instances and refreshes status from Incus.
 func (s *Service) ListInstances(ctx context.Context) ([]models.Instance, error) {
-	return s.store.ListInstances(ctx)
+	list, err := s.store.ListInstances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		s.syncStatusFromIncus(ctx, &list[i])
+	}
+	return list, nil
 }
 
-// GetInstance returns one instance by ID.
+// GetInstance returns one instance by ID and refreshes status from Incus.
 func (s *Service) GetInstance(ctx context.Context, id uuid.UUID) (*models.Instance, error) {
 	inst, err := s.store.GetInstance(ctx, id)
 	if err != nil {
@@ -243,21 +264,58 @@ func (s *Service) GetInstance(ctx context.Context, id uuid.UUID) (*models.Instan
 		}
 		return nil, err
 	}
+	s.syncStatusFromIncus(ctx, inst)
 	return inst, nil
 }
 
-// StartInstance starts a stopped container.
-func (s *Service) StartInstance(ctx context.Context, id uuid.UUID) (*models.Instance, error) {
-	inst, err := s.GetInstance(ctx, id)
+func (s *Service) syncStatusFromIncus(ctx context.Context, inst *models.Instance) {
+	status, err := s.incus.GetStatus(inst.IncusName)
 	if err != nil {
+		return
+	}
+	var next models.InstanceStatus
+	switch {
+	case strings.EqualFold(status, "Running"):
+		next = models.StatusRunning
+	case strings.EqualFold(status, "Stopped"):
+		next = models.StatusStopped
+	default:
+		return
+	}
+	if inst.Status == next && (next != models.StatusRunning || inst.ErrorMessage == "") {
+		return
+	}
+	inst.Status = next
+	if next == models.StatusRunning {
+		inst.ErrorMessage = ""
+	}
+	_ = s.store.UpdateInstanceStatus(ctx, inst.ID, next, inst.ErrorMessage)
+	_ = s.redis.SetInstanceState(ctx, inst.ID.String(), string(next), 24*time.Hour)
+}
+
+// StartInstance starts a stopped container and completes missing default port maps.
+func (s *Service) StartInstance(ctx context.Context, id uuid.UUID) (*models.Instance, error) {
+	inst, err := s.store.GetInstance(ctx, id)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
-	if err := s.incus.StartContainer(inst.IncusName); err != nil {
+	if err := s.incus.EnsureStarted(inst.IncusName); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
+	}
+	if err := s.ensureDefaultPorts(ctx, inst, s.cfg.Ports.DefaultInternalPorts); err != nil {
+		return nil, err
 	}
 	_ = s.store.UpdateInstanceStatus(ctx, id, models.StatusRunning, "")
 	_ = s.redis.SetInstanceState(ctx, id.String(), string(models.StatusRunning), 24*time.Hour)
 	return s.GetInstance(ctx, id)
+}
+
+// RepairInstance clears error state for a live container and attaches missing ports.
+func (s *Service) RepairInstance(ctx context.Context, id uuid.UUID) (*models.Instance, error) {
+	return s.StartInstance(ctx, id)
 }
 
 // StopInstance stops a running container.

@@ -402,6 +402,29 @@ func (c *Client) GetStatus(name string) (string, error) {
 	return inst.Status, nil
 }
 
+// IsRunning reports whether the instance is currently running.
+func (c *Client) IsRunning(name string) bool {
+	status, err := c.GetStatus(name)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(status, "Running")
+}
+
+// EnsureStarted starts the instance if needed. Treats "already running" as success.
+func (c *Client) EnsureStarted(name string) error {
+	if c.IsRunning(name) {
+		return nil
+	}
+	if err := c.StartContainer(name); err != nil {
+		if c.IsRunning(name) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 // AddProxyDevice attaches an Incus proxy device mapping host:external -> container:internal.
 func (c *Client) AddProxyDevice(instanceName, deviceName, protocol string, hostPort, internalPort int) error {
 	inst, etag, err := c.server.GetInstance(instanceName)
