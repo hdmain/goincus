@@ -696,6 +696,7 @@ type ResourceSample struct {
 }
 
 // ResourceSample reads CPU/memory/disk/network counters from instance state in one call.
+// Incus often reports -1 for unavailable counters; those are normalized to 0.
 func (c *Client) ResourceSample(name string) (ResourceSample, error) {
 	var out ResourceSample
 	st, _, err := c.server.GetInstanceState(name)
@@ -705,33 +706,40 @@ func (c *Client) ResourceSample(name string) (ResourceSample, error) {
 	if st == nil {
 		return out, nil
 	}
-	out.CPUUsageNS = st.CPU.Usage
-	out.MemoryUsedBytes = st.Memory.Usage
-	out.MemoryTotalBytes = st.Memory.Total
+	out.CPUUsageNS = nonNeg(st.CPU.Usage)
+	out.MemoryUsedBytes = nonNeg(st.Memory.Usage)
+	out.MemoryTotalBytes = nonNeg(st.Memory.Total)
 	if st.Disk != nil {
 		if d, ok := st.Disk["root"]; ok {
-			out.DiskUsedBytes = d.Usage
-			out.DiskTotalBytes = d.Total
+			out.DiskUsedBytes = nonNeg(d.Usage)
+			out.DiskTotalBytes = nonNeg(d.Total)
 		} else {
 			for _, d := range st.Disk {
-				out.DiskUsedBytes += d.Usage
-				out.DiskTotalBytes += d.Total
+				out.DiskUsedBytes += nonNeg(d.Usage)
+				out.DiskTotalBytes += nonNeg(d.Total)
 			}
 		}
 	}
 	if st.Network != nil {
 		if nic, ok := st.Network["eth0"]; ok {
-			out.NetBytesTotal = nic.Counters.BytesReceived + nic.Counters.BytesSent
+			out.NetBytesTotal = nonNeg(nic.Counters.BytesReceived) + nonNeg(nic.Counters.BytesSent)
 		} else {
 			for ifname, n := range st.Network {
 				if ifname == "lo" {
 					continue
 				}
-				out.NetBytesTotal += n.Counters.BytesReceived + n.Counters.BytesSent
+				out.NetBytesTotal += nonNeg(n.Counters.BytesReceived) + nonNeg(n.Counters.BytesSent)
 			}
 		}
 	}
 	return out, nil
+}
+
+func nonNeg(v int64) int64 {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 // EnsureDiskIsolation applies sysfs overlays so guests cannot list host disks via lsblk.

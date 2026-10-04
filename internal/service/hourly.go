@@ -125,16 +125,30 @@ func (s *Service) sampleInstanceHourlyMetrics(ctx context.Context, inst *models.
 	row := db.HourlyMetricsRow{
 		InstanceID:       inst.ID,
 		Hour:             hour,
-		CPUPercent:       cpuPercent,
-		MemoryUsedBytes:  sample.MemoryUsedBytes,
-		MemoryTotalBytes: memTotal,
-		DiskUsedBytes:    sample.DiskUsedBytes,
-		DiskTotalBytes:   diskTotal,
-		BandwidthBytes:   bandwidth,
-		CPUUsageNS:       sample.CPUUsageNS,
-		NetBytesTotal:    sample.NetBytesTotal,
+		CPUPercent:       clampNonNegFloat(cpuPercent),
+		MemoryUsedBytes:  clampNonNeg(sample.MemoryUsedBytes),
+		MemoryTotalBytes: clampNonNeg(memTotal),
+		DiskUsedBytes:    clampNonNeg(sample.DiskUsedBytes),
+		DiskTotalBytes:   clampNonNeg(diskTotal),
+		BandwidthBytes:   clampNonNeg(bandwidth),
+		CPUUsageNS:       clampNonNeg(sample.CPUUsageNS),
+		NetBytesTotal:    clampNonNeg(sample.NetBytesTotal),
 	}
 	return s.store.UpsertHourlyMetrics(ctx, row)
+}
+
+func clampNonNeg(v int64) int64 {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+func clampNonNegFloat(v float64) float64 {
+	if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
 }
 
 func computeCPUPercent(prevNS, curNS int64, elapsed time.Duration, cpuCores float64) float64 {
