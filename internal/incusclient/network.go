@@ -97,6 +97,17 @@ if $IPT -L DOCKER-USER -n >/dev/null 2>&1; then
   $IPT -C DOCKER-USER -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -i "$BR" -j ACCEPT
   $IPT -C DOCKER-USER -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -o "$BR" -j ACCEPT
 fi
+# Block guest → host management path on the bridge (SSH/API/DB).
+# Keep DHCP/DNS so Incus dnsmasq still works.
+$IPT -N GOINCUS-BRIDGE-IN 2>/dev/null || true
+$IPT -F GOINCUS-BRIDGE-IN
+$IPT -A GOINCUS-BRIDGE-IN -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+$IPT -A GOINCUS-BRIDGE-IN -p udp --dport 67 -j ACCEPT
+$IPT -A GOINCUS-BRIDGE-IN -p udp --dport 53 -j ACCEPT
+$IPT -A GOINCUS-BRIDGE-IN -p tcp --dport 53 -j ACCEPT
+$IPT -A GOINCUS-BRIDGE-IN -j DROP
+$IPT -C INPUT -i "$BR" -j GOINCUS-BRIDGE-IN 2>/dev/null \
+  || $IPT -I INPUT 1 -i "$BR" -j GOINCUS-BRIDGE-IN
 `, bridgeName, subnet)
 	out, err := exec.Command("bash", "-lc", script).CombinedOutput()
 	if err != nil {

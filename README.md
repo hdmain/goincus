@@ -72,6 +72,7 @@ Each VPS is an **unprivileged** Incus container with:
 - Incus guest API disabled (`/dev/incus` not exposed)
 - default seccomp deny + no syscall intercept helpers
 - NIC MAC/IPv4/IPv6 filtering and bridge port isolation (no guest↔guest)
+- host INPUT from the Incus bridge blocked except DHCP/DNS (no guest→host SSH/API)
 - host sysctl hardening (`/etc/sysctl.d/99-goincus-isolation.conf`)
 
 Residual risk: all containers share the host kernel — a kernel 0-day can still escape. For stronger isolation use VMs/microVMs.

@@ -72,6 +72,26 @@ apt-get install -y -qq sshpass >/dev/null 2>&1 || true
 sshpass -p "${PASS}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   -o ConnectTimeout=10 -p "${SSH}" root@127.0.0.1 'echo SSH_OK; hostname; nproc; free -m | awk "NR==2{print}"; df -h / | awk "NR==2{print}"'
 
+echo "== guest must not reach host management via bridge gateway =="
+incus exec "${INCUS}" -- bash -lc '
+set -e
+GW=$(ip -4 route show default | awk "/default/{print \$3; exit}")
+test -n "$GW"
+# Internet + DNS still required after host INPUT hardening.
+getent hosts 1.1.1.1 >/dev/null
+ping -c1 -W2 1.1.1.1 >/dev/null
+# Host SSH/API on the bridge gateway must fail (timeout/refused).
+if timeout 3 bash -c "echo >/dev/tcp/$GW/22" 2>/dev/null; then
+  echo "FAIL: guest can reach host SSH on $GW:22" >&2
+  exit 1
+fi
+if timeout 3 bash -c "echo >/dev/tcp/$GW/9603" 2>/dev/null; then
+  echo "FAIL: guest can reach host API on $GW:9603" >&2
+  exit 1
+fi
+echo "GUEST_TO_HOST_BLOCKED gw=$GW"
+'
+
 echo "== host must not publish ports outside the block =="
 # pick a port just outside the block
 OUT=$((SSH + 20))

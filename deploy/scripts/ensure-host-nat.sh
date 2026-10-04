@@ -71,6 +71,18 @@ if $IPT -L DOCKER-USER -n >/dev/null 2>&1; then
   $IPT -C DOCKER-USER -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -o "$BR" -j ACCEPT
 fi
 
+# Guests must not reach host management services via the bridge gateway
+# (SSH/API/DB). Only DHCP + DNS for Incus dnsmasq, plus established replies.
+$IPT -N GOINCUS-BRIDGE-IN 2>/dev/null || true
+$IPT -F GOINCUS-BRIDGE-IN
+$IPT -A GOINCUS-BRIDGE-IN -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+$IPT -A GOINCUS-BRIDGE-IN -p udp --dport 67 -j ACCEPT
+$IPT -A GOINCUS-BRIDGE-IN -p udp --dport 53 -j ACCEPT
+$IPT -A GOINCUS-BRIDGE-IN -p tcp --dport 53 -j ACCEPT
+$IPT -A GOINCUS-BRIDGE-IN -j DROP
+$IPT -C INPUT -i "$BR" -j GOINCUS-BRIDGE-IN 2>/dev/null \
+  || $IPT -I INPUT 1 -i "$BR" -j GOINCUS-BRIDGE-IN
+
 # Open published NAT VPS port range (+ API) when UFW is active (any host).
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi 'Status: active'; then
   ufw allow "${PORT_START}:${PORT_END}/tcp" comment 'goincus NAT VPS ports' >/dev/null 2>&1 || true
