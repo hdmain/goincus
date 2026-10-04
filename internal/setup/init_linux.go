@@ -484,18 +484,12 @@ ExecStart=/usr/local/bin/goincus serve -config /etc/goincus/config.yaml -migrati
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
 PrivateTmp=true
-ProtectKernelModules=true
-ProtectControlGroups=true
+ProtectHome=true
 LockPersonality=true
 RestrictSUIDSGID=true
 RestrictRealtime=true
-ReadWritePaths=/var/lib/incus /run/incus /var/log/goincus
-ReadOnlyPaths=/etc/goincus
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/incus /run/incus /var/log/goincus /etc/goincus /etc/sysctl.d /etc/modules-load.d /etc/subuid /etc/subgid /var/lib/goincus
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=goincus
@@ -507,10 +501,36 @@ WantedBy=multi-user.target
 		return err
 	}
 	_ = os.MkdirAll("/usr/local/libexec/goincus", 0o755)
+	// Keep in sync with deploy/scripts/ensure-host-nat.sh (portable across hosts).
 	natScript := `#!/bin/sh
+# Persistable host egress for goincus Incus bridge (survives reboot; Docker-safe).
+# Portable: reads bridge/ports from env or /etc/goincus/config.yaml when present.
 set -eu
-BR="${GOINCUS_BRIDGE:-incusbr0}"
+CFG="${GOINCUS_CONFIG:-/etc/goincus/config.yaml}"
+yaml_get() {
+  parent="$1"
+  child="$2"
+  [ -f "$CFG" ] || return 0
+  awk -v p="$parent" -v c="$child" '
+    $0 ~ "^"p":" { insec=1; next }
+    insec && /^[^[:space:]#]/ { insec=0 }
+    insec && $1 == c":" {
+      v=$2
+      gsub(/"/, "", v)
+      print v
+      exit
+    }
+  ' "$CFG"
+}
+BR="${GOINCUS_BRIDGE:-$(yaml_get incus network)}"
+BR="${BR:-incusbr0}"
 SUBNET="${GOINCUS_SUBNET:-10.72.160.0/24}"
+PORT_START="${GOINCUS_PORT_START:-$(yaml_get ports host_range_start)}"
+PORT_END="${GOINCUS_PORT_END:-$(yaml_get ports host_range_end)}"
+PORT_START="${PORT_START:-20000}"
+PORT_END="${PORT_END:-29999}"
+API_PORT="${GOINCUS_API_PORT:-$(yaml_get server port)}"
+API_PORT="${API_PORT:-9603}"
 mkdir -p /etc/modules-load.d
 printf 'br_netfilter\n' > /etc/modules-load.d/goincus-br-netfilter.conf
 modprobe br_netfilter 2>/dev/null || true
@@ -534,6 +554,15 @@ $IPT -C FORWARD -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I FORWARD 1 -o "$BR" -j 
 if $IPT -L DOCKER-USER -n >/dev/null 2>&1; then
   $IPT -C DOCKER-USER -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -i "$BR" -j ACCEPT
   $IPT -C DOCKER-USER -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -o "$BR" -j ACCEPT
+fi
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi 'Status: active'; then
+  ufw allow "${PORT_START}:${PORT_END}/tcp" comment 'goincus NAT VPS ports' >/dev/null 2>&1 || true
+  ufw allow "${API_PORT}/tcp" comment 'goincus API' >/dev/null 2>&1 || true
+fi
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -qi running; then
+  firewall-cmd --permanent --add-port="${PORT_START}-${PORT_END}/tcp" >/dev/null 2>&1 || true
+  firewall-cmd --permanent --add-port="${API_PORT}/tcp" >/dev/null 2>&1 || true
+  firewall-cmd --reload >/dev/null 2>&1 || true
 fi
 exit 0
 `

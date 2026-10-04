@@ -1,0 +1,16 @@
+---
+description: Keep goincus portable across hosts — never bake in one test server
+alwaysApply: true
+---
+
+# Portable multi-host product
+
+goincus must work on **any** Debian/Ubuntu/RHEL-like host after `goincus init`, not just the current test VM.
+
+## Rules
+
+- Do **not** hardcode host IPs, hostnames, credentials, NICs, or one-off lab paths in product code, defaults, packaging, or docs examples (use `HOST`, `YOUR.PUBLIC.IP`, env vars, or config).
+- Prefer config (`/etc/goincus/config.yaml`) and env (`GOINCUS_*`) over assumptions.
+- Firewall/NAT/storage helpers must read port ranges, API port, bridge, and pool from config/env with sensible defaults.
+- Test VMs are for verification only — fixes discovered there must ship as generic behavior.
+- CLI examples and README must stay host-agnostic.

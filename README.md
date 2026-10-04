@@ -122,7 +122,7 @@ goincus health
 goincus list
 goincus create web-1 -cpu 1 -memory 512 -disk 10
 goincus get web-1
-goincus ssh web-1 -host 5.83.150.237
+goincus ssh web-1 -host YOUR.PUBLIC.IP
 goincus stop web-1
 goincus start web-1
 goincus restart web-1
@@ -130,6 +130,7 @@ goincus repair web-1
 goincus delete web-1 -y
 ```
 
+Works the same on any host after `goincus init` — nothing is tied to a specific server.
 Remote API:
 
 ```bash
