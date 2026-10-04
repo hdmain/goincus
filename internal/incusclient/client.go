@@ -249,13 +249,25 @@ func (c *Client) filterAvailableProfiles(profiles []string) []string {
 }
 
 // ResourceConfig builds Incus instance config keys for CPU, memory, and process limits.
+//
+// limits.cpu as an integer makes Incus pin the container to that many host CPUs
+// (cpuset). Do not set limits.cpu.allowance=100% alongside it — that is only a
+// soft scheduler weight and confuses operators who expect a hard 1-CPU VPS.
 func ResourceConfig(cpuCores, memoryMB, processes int) map[string]string {
+	if cpuCores < 1 {
+		cpuCores = 1
+	}
+	if memoryMB < 64 {
+		memoryMB = 64
+	}
+	if processes < 64 {
+		processes = 64
+	}
 	return map[string]string{
-		"limits.cpu":           strconv.Itoa(cpuCores),
-		"limits.cpu.allowance": "100%",
-		"limits.memory":        fmt.Sprintf("%dMiB", memoryMB),
-		"limits.memory.swap":   "false",
-		"limits.processes":     strconv.Itoa(processes),
+		"limits.cpu":         strconv.Itoa(cpuCores),
+		"limits.memory":      fmt.Sprintf("%dMiB", memoryMB),
+		"limits.memory.swap": "false",
+		"limits.processes":   strconv.Itoa(processes),
 	}
 }
 
@@ -525,9 +537,14 @@ func (c *Client) UpdateResourceLimits(name string, cpuCores, memoryMB, processes
 	if err != nil {
 		return err
 	}
+	if inst.Config == nil {
+		inst.Config = map[string]string{}
+	}
 	for k, v := range ResourceConfig(cpuCores, memoryMB, processes) {
 		inst.Config[k] = v
 	}
+	// Drop legacy soft-weight key so cpuset from limits.cpu is the sole CPU control.
+	delete(inst.Config, "limits.cpu.allowance")
 	op, err := c.server.UpdateInstance(name, inst.Writable(), etag)
 	if err != nil {
 		return err

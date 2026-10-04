@@ -14,6 +14,9 @@ func TestResourceConfig(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, got, want)
 		}
 	}
+	if _, ok := cfg["limits.cpu.allowance"]; ok {
+		t.Fatal("limits.cpu.allowance must not be set (soft weight confuses 1-CPU VPSes)")
+	}
 }
 
 func TestHardenedInstanceConfig(t *testing.T) {

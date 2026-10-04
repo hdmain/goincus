@@ -480,6 +480,9 @@ func (s *Service) StartInstance(ctx context.Context, id uuid.UUID) (*models.Inst
 		}
 		return nil, err
 	}
+	if err := s.incus.UpdateResourceLimits(inst.IncusName, inst.CPUCores, inst.MemoryMB, inst.Processes); err != nil {
+		s.logger.Warn("apply resource limits", "incus", inst.IncusName, "err", err)
+	}
 	if err := s.incus.EnsureStarted(inst.IncusName); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}
