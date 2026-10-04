@@ -33,4 +33,12 @@ if $IPT -L DOCKER-USER -n >/dev/null 2>&1; then
   $IPT -C DOCKER-USER -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -i "$BR" -j ACCEPT
   $IPT -C DOCKER-USER -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -o "$BR" -j ACCEPT
 fi
+
+# Open published NAT VPS port range (+ API) when UFW is active.
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi 'Status: active'; then
+  PORT_START="${GOINCUS_PORT_START:-20000}"
+  PORT_END="${GOINCUS_PORT_END:-29999}"
+  ufw allow "${PORT_START}:${PORT_END}/tcp" comment 'goincus NAT VPS ports' >/dev/null 2>&1 || true
+  ufw allow 9603/tcp comment 'goincus API' >/dev/null 2>&1 || true
+fi
 exit 0
