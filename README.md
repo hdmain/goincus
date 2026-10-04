@@ -134,16 +134,27 @@ goincus start web-1
 goincus restart web-1
 goincus repair web-1
 goincus usage web-1 -days 30          # daily disk + bandwidth for charts
+goincus metrics -hours 24             # hourly CPU/RAM/disk/bandwidth (all VPS)
+goincus metrics web-1 -hours 24
 goincus delete web-1 -y
 ```
 
-Daily usage is sampled automatically (UTC day). API:
+Usage sampling (`usage` in config.yaml):
+
+```yaml
+usage:
+  sample_interval: 1m      # traffic + daily samples
+  hourly_enabled: true
+  hourly_interval: 1h      # CPU/RAM/disk/bandwidth for every instance
+  hourly_retention_days: 30
+  daily_retention_days: 400
+```
 
 ```http
 GET /api/v1/instances/{id|name}/usage?days=30
+GET /api/v1/metrics?hours=24
+GET /api/v1/instances/{id|name}/metrics?hours=24
 ```
-
-Response `points[]` has `date`, `disk_used_bytes`, `disk_total_bytes`, `bandwidth_bytes` (rx+tx that day).
 
 Works the same on any host after `goincus init` — nothing is tied to a specific server.
 Remote API:

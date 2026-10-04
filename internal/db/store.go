@@ -420,6 +420,128 @@ func (s *Store) PurgeOldDailyUsage(ctx context.Context, before time.Time) error 
 	return err
 }
 
+// HourlyMetricsRow is one UTC hour bucket of resource samples.
+type HourlyMetricsRow struct {
+	InstanceID       uuid.UUID
+	Hour             time.Time
+	CPUPercent       float64
+	MemoryUsedBytes  int64
+	MemoryTotalBytes int64
+	DiskUsedBytes    int64
+	DiskTotalBytes   int64
+	BandwidthBytes   int64
+	CPUUsageNS       int64
+	NetBytesTotal    int64
+}
+
+// UpsertHourlyMetrics inserts or updates one hour sample.
+func (s *Store) UpsertHourlyMetrics(ctx context.Context, row HourlyMetricsRow) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO instance_hourly_metrics (
+			instance_id, hour, cpu_percent, memory_used_bytes, memory_total_bytes,
+			disk_used_bytes, disk_total_bytes, bandwidth_bytes, cpu_usage_ns, net_bytes_total, created_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+		ON CONFLICT (instance_id, hour) DO UPDATE SET
+			cpu_percent = EXCLUDED.cpu_percent,
+			memory_used_bytes = EXCLUDED.memory_used_bytes,
+			memory_total_bytes = EXCLUDED.memory_total_bytes,
+			disk_used_bytes = EXCLUDED.disk_used_bytes,
+			disk_total_bytes = EXCLUDED.disk_total_bytes,
+			bandwidth_bytes = EXCLUDED.bandwidth_bytes,
+			cpu_usage_ns = EXCLUDED.cpu_usage_ns,
+			net_bytes_total = EXCLUDED.net_bytes_total`,
+		row.InstanceID, row.Hour.UTC(),
+		row.CPUPercent, row.MemoryUsedBytes, row.MemoryTotalBytes,
+		row.DiskUsedBytes, row.DiskTotalBytes, row.BandwidthBytes,
+		row.CPUUsageNS, row.NetBytesTotal,
+	)
+	return err
+}
+
+// LatestHourlyMetrics returns the most recent sample before beforeHour (exclusive), or ErrNotFound.
+func (s *Store) LatestHourlyMetrics(ctx context.Context, instanceID uuid.UUID, beforeHour time.Time) (*HourlyMetricsRow, error) {
+	const q = `
+		SELECT instance_id, hour, cpu_percent, memory_used_bytes, memory_total_bytes,
+		       disk_used_bytes, disk_total_bytes, bandwidth_bytes, cpu_usage_ns, net_bytes_total
+		FROM instance_hourly_metrics
+		WHERE instance_id = $1 AND hour < $2
+		ORDER BY hour DESC
+		LIMIT 1`
+	var row HourlyMetricsRow
+	err := s.pool.QueryRow(ctx, q, instanceID, beforeHour.UTC()).Scan(
+		&row.InstanceID, &row.Hour, &row.CPUPercent, &row.MemoryUsedBytes, &row.MemoryTotalBytes,
+		&row.DiskUsedBytes, &row.DiskTotalBytes, &row.BandwidthBytes, &row.CPUUsageNS, &row.NetBytesTotal,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &row, nil
+}
+
+// ListHourlyMetrics returns samples in [from, to] inclusive for one instance.
+func (s *Store) ListHourlyMetrics(ctx context.Context, instanceID uuid.UUID, from, to time.Time) ([]HourlyMetricsRow, error) {
+	const q = `
+		SELECT instance_id, hour, cpu_percent, memory_used_bytes, memory_total_bytes,
+		       disk_used_bytes, disk_total_bytes, bandwidth_bytes, cpu_usage_ns, net_bytes_total
+		FROM instance_hourly_metrics
+		WHERE instance_id = $1 AND hour >= $2 AND hour <= $3
+		ORDER BY hour ASC`
+	rows, err := s.pool.Query(ctx, q, instanceID, from.UTC(), to.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HourlyMetricsRow
+	for rows.Next() {
+		var row HourlyMetricsRow
+		if err := rows.Scan(
+			&row.InstanceID, &row.Hour, &row.CPUPercent, &row.MemoryUsedBytes, &row.MemoryTotalBytes,
+			&row.DiskUsedBytes, &row.DiskTotalBytes, &row.BandwidthBytes, &row.CPUUsageNS, &row.NetBytesTotal,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// ListHourlyMetricsAll returns samples in [from, to] for all non-deleted instances.
+func (s *Store) ListHourlyMetricsAll(ctx context.Context, from, to time.Time) ([]HourlyMetricsRow, error) {
+	const q = `
+		SELECT m.instance_id, m.hour, m.cpu_percent, m.memory_used_bytes, m.memory_total_bytes,
+		       m.disk_used_bytes, m.disk_total_bytes, m.bandwidth_bytes, m.cpu_usage_ns, m.net_bytes_total
+		FROM instance_hourly_metrics m
+		INNER JOIN instances i ON i.id = m.instance_id
+		WHERE i.status <> 'deleted' AND m.hour >= $1 AND m.hour <= $2
+		ORDER BY i.name ASC, m.hour ASC`
+	rows, err := s.pool.Query(ctx, q, from.UTC(), to.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HourlyMetricsRow
+	for rows.Next() {
+		var row HourlyMetricsRow
+		if err := rows.Scan(
+			&row.InstanceID, &row.Hour, &row.CPUPercent, &row.MemoryUsedBytes, &row.MemoryTotalBytes,
+			&row.DiskUsedBytes, &row.DiskTotalBytes, &row.BandwidthBytes, &row.CPUUsageNS, &row.NetBytesTotal,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// PurgeOldHourlyMetrics deletes hourly samples older than before.
+func (s *Store) PurgeOldHourlyMetrics(ctx context.Context, before time.Time) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM instance_hourly_metrics WHERE hour < $1`, before.UTC())
+	return err
+}
+
 // ListActiveInstances returns non-deleted instances in creating/running/stopped states for traffic jobs.
 func (s *Store) ListActiveInstances(ctx context.Context) ([]models.Instance, error) {
 	const q = `

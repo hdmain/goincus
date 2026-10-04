@@ -57,6 +57,8 @@ func main() {
 		os.Exit(runSSHInfo(os.Args[2:]))
 	case "usage":
 		os.Exit(runUsage(os.Args[2:]))
+	case "metrics":
+		os.Exit(runMetrics(os.Args[2:]))
 	case "version", "-version", "--version":
 		fmt.Println(version)
 	case "help", "-h", "--help":
@@ -74,7 +76,7 @@ func printUsage() {
 Usage:
   goincus init [--force] [--skip-install] [--config PATH]
   goincus serve [-config PATH] [-migrations DIR]
-  goincus health|list|get|create|delete|start|stop|restart|repair|ssh|usage ...
+  goincus health|list|get|create|delete|start|stop|restart|repair|ssh|usage|metrics ...
   goincus version
 
 Server:
@@ -90,6 +92,7 @@ CLI (talks to API; key from -key, GOINCUS_API_KEY, or /etc/goincus/config.yaml):
   start|stop|restart|repair <name|id>
   ssh <name|id>          Print ssh command + password (-host IP)
   usage <name|id>        Daily disk + bandwidth chart data (-days 30)
+  metrics [name|id]      Hourly CPU/RAM/disk/bandwidth (-hours 24; omit name = all)
 
 Common flags: -url -key -config -json
 Env: GOINCUS_URL GOINCUS_API_KEY GOINCUS_CONFIG GOINCUS_SSH_HOST

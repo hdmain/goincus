@@ -119,3 +119,29 @@ type UsageChartResponse struct {
 	To         string            `json:"to"`
 	Points     []DailyUsagePoint `json:"points"`
 }
+
+// HourlyMetricsPoint is one UTC hour of CPU/RAM/disk/bandwidth for charts.
+type HourlyMetricsPoint struct {
+	Hour               string  `json:"hour"` // RFC3339 UTC hour bucket
+	CPUPercent         float64 `json:"cpu_percent"`
+	MemoryUsedBytes    int64   `json:"memory_used_bytes"`
+	MemoryTotalBytes   int64   `json:"memory_total_bytes"`
+	DiskUsedBytes      int64   `json:"disk_used_bytes"`
+	DiskTotalBytes     int64   `json:"disk_total_bytes"`
+	BandwidthBytes     int64   `json:"bandwidth_bytes"`
+}
+
+// InstanceMetricsSeries is hourly history for one VPS.
+type InstanceMetricsSeries struct {
+	InstanceID uuid.UUID            `json:"instance_id"`
+	Name       string               `json:"name"`
+	Points     []HourlyMetricsPoint `json:"points"`
+}
+
+// MetricsChartResponse is returned by GET /metrics and GET /instances/{id}/metrics.
+type MetricsChartResponse struct {
+	Hours int                     `json:"hours"`
+	From  string                  `json:"from"`
+	To    string                  `json:"to"`
+	Items []InstanceMetricsSeries `json:"items"`
+}

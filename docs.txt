@@ -29,10 +29,12 @@ ENDPOINTS (summary)
   GET    /healthz
   GET    /api/v1/health
 
+  GET    /api/v1/metrics?hours=24
   GET    /api/v1/instances/
   POST   /api/v1/instances/
   GET    /api/v1/instances/{id|name}
   GET    /api/v1/instances/{id|name}/usage?days=30
+  GET    /api/v1/instances/{id|name}/metrics?hours=24
   DELETE /api/v1/instances/{id|name}
   POST   /api/v1/instances/{id|name}/start
   POST   /api/v1/instances/{id|name}/stop
@@ -240,6 +242,57 @@ Response:
 
 
 ------------------------------------------------------------------------------
+5b) HOURLY METRICS (CPU / RAM / disk / bandwidth)
+------------------------------------------------------------------------------
+
+GET /api/v1/metrics?hours=24
+GET /api/v1/instances/{id|name}/metrics?hours=24
+
+Auth: required
+Status: 200
+
+Query:
+  hours  lookback ending current UTC hour (default 24, max 2160)
+
+Config (usage.* in /etc/goincus/config.yaml):
+  sample_interval: 1m          # monthly traffic + daily samples
+  hourly_enabled: true         # store CPU/RAM/disk/bandwidth for every VPS
+  hourly_interval: 1h          # how often to write hourly buckets
+  hourly_retention_days: 30
+  daily_retention_days: 400
+
+GET /api/v1/metrics returns all instances on this node.
+Per-instance path filters to one VPS.
+
+Response:
+  {
+    "hours": 24,
+    "from": "2026-10-03T18:00:00Z",
+    "to": "2026-10-04T17:00:00Z",
+    "items": [
+      {
+        "instance_id": "uuid",
+        "name": "web-1",
+        "points": [
+          {
+            "hour": "2026-10-04T17:00:00Z",
+            "cpu_percent": 12.5,
+            "memory_used_bytes": 120000000,
+            "memory_total_bytes": 268435456,
+            "disk_used_bytes": 790630400,
+            "disk_total_bytes": 5368709120,
+            "bandwidth_bytes": 4500000
+          }
+        ]
+      }
+    ]
+  }
+
+cpu_percent is relative to the instance CPU allocation (100 = fully using its cores).
+bandwidth_bytes is rx+tx transferred in that hour bucket.
+
+
+------------------------------------------------------------------------------
 6) DELETE INSTANCE
 ------------------------------------------------------------------------------
 
@@ -365,6 +418,7 @@ CLI (talks to the same API)
   goincus create <name> [-cpu] [-memory] [-disk] [-bandwidth] [-traffic] [-image] [-wait]
   goincus start|stop|restart|repair <name|id>
   goincus usage <name|id> [-days 30] [-json]
+  goincus metrics [name|id] [-hours 24] [-json]
   goincus ssh <name|id> [-host YOUR.PUBLIC.IP]
   goincus delete <name|id> [-y]
 
@@ -393,8 +447,16 @@ curl -s -X POST http://127.0.0.1:9603/api/v1/instances/ \
 curl -s http://127.0.0.1:9603/api/v1/instances/web-1 \
   -H "Authorization: Bearer gic_xxx"
 
-# Usage chart
+# Usage chart (daily)
 curl -s "http://127.0.0.1:9603/api/v1/instances/web-1/usage?days=30" \
+  -H "Authorization: Bearer gic_xxx"
+
+# Hourly metrics — all VPS
+curl -s "http://127.0.0.1:9603/api/v1/metrics?hours=24" \
+  -H "Authorization: Bearer gic_xxx"
+
+# Hourly metrics — one VPS
+curl -s "http://127.0.0.1:9603/api/v1/instances/web-1/metrics?hours=24" \
   -H "Authorization: Bearer gic_xxx"
 
 # Stop / start

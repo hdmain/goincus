@@ -56,3 +56,12 @@ defaults:
   bandwidth_mbps: 100
   # Calendar-month transfer quota (GiB, rx+tx). 0 = unlimited. Over-quota → 8kbit throttle.
   traffic_monthly_gb: 1024
+
+usage:
+  # How often to refresh monthly traffic counters + daily disk/bandwidth samples.
+  sample_interval: 1m
+  # Store CPU/RAM/disk/bandwidth for every instance on this interval (charts).
+  hourly_enabled: true
+  hourly_interval: 1h
+  hourly_retention_days: 30
+  daily_retention_days: 400

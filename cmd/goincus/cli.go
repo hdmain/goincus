@@ -250,6 +250,43 @@ func runAction(action string, args []string) int {
 	return 0
 }
 
+func runMetrics(args []string) int {
+	name, flagArgs := splitNameAndFlags(args)
+	fs := flag.NewFlagSet("metrics", flag.ExitOnError)
+	hours := fs.Int("hours", 24, "number of UTC hours to return (max 2160)")
+	f, rest := parseCLIFlags(fs, flagArgs)
+	if name == "" && len(rest) > 0 {
+		name = rest[0]
+	}
+	cli, err := newAPIClient(f)
+	if err != nil {
+		return cliErr(err)
+	}
+	out, err := cli.GetMetrics(context.Background(), name, *hours)
+	if err != nil {
+		return cliErr(err)
+	}
+	if f.jsonOut {
+		return printJSON(out)
+	}
+	fmt.Printf("range: %s → %s (%d hours)\n", out.From, out.To, out.Hours)
+	for _, item := range out.Items {
+		fmt.Printf("\n%s (%s) — %d points\n", item.Name, item.InstanceID, len(item.Points))
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "HOUR\tCPU%\tRAM\tDISK\tBANDWIDTH")
+		for _, p := range item.Points {
+			fmt.Fprintf(w, "%s\t%.2f\t%s/%s\t%s/%s\t%s\n",
+				p.Hour, p.CPUPercent,
+				formatBytes(p.MemoryUsedBytes), formatBytes(p.MemoryTotalBytes),
+				formatBytes(p.DiskUsedBytes), formatBytes(p.DiskTotalBytes),
+				formatBytes(p.BandwidthBytes),
+			)
+		}
+		_ = w.Flush()
+	}
+	return 0
+}
+
 func runUsage(args []string) int {
 	name, flagArgs := splitNameAndFlags(args)
 	fs := flag.NewFlagSet("usage", flag.ExitOnError)

@@ -42,12 +42,14 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/v1/health", s.handleHealth)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/metrics", s.handleGetAllMetrics)
 		r.Route("/instances", func(r chi.Router) {
 			r.Get("/", s.handleListInstances)
 			r.Post("/", s.handleCreateInstance)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Get("/", s.handleGetInstance)
 				r.Get("/usage", s.handleGetInstanceUsage)
+				r.Get("/metrics", s.handleGetInstanceMetrics)
 				r.Delete("/", s.handleDeleteInstance)
 				r.Post("/start", s.handleStartInstance)
 				r.Post("/stop", s.handleStopInstance)
@@ -118,6 +120,41 @@ func (s *Server) handleGetInstanceUsage(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	out, err := s.svc.GetUsageChart(r.Context(), inst.ID, days)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleGetAllMetrics(w http.ResponseWriter, r *http.Request) {
+	hours := 24
+	if v := r.URL.Query().Get("hours"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			hours = parsed
+		}
+	}
+	out, err := s.svc.GetHourlyMetrics(r.Context(), uuid.Nil, hours)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleGetInstanceMetrics(w http.ResponseWriter, r *http.Request) {
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	hours := 24
+	if v := r.URL.Query().Get("hours"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			hours = parsed
+		}
+	}
+	out, err := s.svc.GetHourlyMetrics(r.Context(), inst.ID, hours)
 	if err != nil {
 		writeServiceError(w, err)
 		return

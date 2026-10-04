@@ -7,15 +7,12 @@ import (
 	"github.com/hdmain/goincus/internal/models"
 )
 
-const trafficPollInterval = time.Minute
-
-// StartBackgroundJobs launches long-running reconcile loops (monthly traffic, etc.).
-func (s *Service) StartBackgroundJobs(ctx context.Context) {
-	go s.trafficLoop(ctx)
-}
-
 func (s *Service) trafficLoop(ctx context.Context) {
-	ticker := time.NewTicker(trafficPollInterval)
+	interval := s.cfg.Usage.SampleInterval.Duration()
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	s.reconcileTraffic(ctx)
 	for {

@@ -22,6 +22,21 @@ type Config struct {
 	Incus    IncusConfig    `yaml:"incus"`
 	Ports    PortsConfig    `yaml:"ports"`
 	Defaults DefaultsConfig `yaml:"defaults"`
+	Usage    UsageConfig    `yaml:"usage"`
+}
+
+// UsageConfig controls traffic accounting and metric history sampling.
+type UsageConfig struct {
+	// SampleInterval is how often to refresh monthly traffic + daily disk/bandwidth samples.
+	SampleInterval Duration `yaml:"sample_interval"`
+	// HourlyEnabled stores CPU/RAM/disk/bandwidth for every instance on HourlyInterval.
+	HourlyEnabled bool `yaml:"hourly_enabled"`
+	// HourlyInterval is how often to write hourly metrics (default 1h).
+	HourlyInterval Duration `yaml:"hourly_interval"`
+	// HourlyRetentionDays keeps hourly rows this many days (default 30).
+	HourlyRetentionDays int `yaml:"hourly_retention_days"`
+	// DailyRetentionDays keeps daily chart rows this many days (default 400).
+	DailyRetentionDays int `yaml:"daily_retention_days"`
 }
 
 type ServerConfig struct {
@@ -190,6 +205,13 @@ func Default() *Config {
 			BandwidthMbps:    100,
 			TrafficMonthlyGB: 1024,
 		},
+		Usage: UsageConfig{
+			SampleInterval:      Duration(time.Minute),
+			HourlyEnabled:       true,
+			HourlyInterval:      Duration(time.Hour),
+			HourlyRetentionDays: 30,
+			DailyRetentionDays:  400,
+		},
 	}
 }
 
@@ -254,6 +276,18 @@ func (c *Config) Validate() error {
 	}
 	if c.Defaults.TrafficMonthlyGB < 0 {
 		return fmt.Errorf("defaults.traffic_monthly_gb must be >= 0 (0 = unlimited)")
+	}
+	if c.Usage.SampleInterval.Duration() <= 0 {
+		c.Usage.SampleInterval = Duration(time.Minute)
+	}
+	if c.Usage.HourlyInterval.Duration() <= 0 {
+		c.Usage.HourlyInterval = Duration(time.Hour)
+	}
+	if c.Usage.HourlyRetentionDays <= 0 {
+		c.Usage.HourlyRetentionDays = 30
+	}
+	if c.Usage.DailyRetentionDays <= 0 {
+		c.Usage.DailyRetentionDays = 400
 	}
 	if len(c.Auth.APIKeys) == 0 {
 		return fmt.Errorf("auth.api_keys must contain at least one key (run: goincus init)")

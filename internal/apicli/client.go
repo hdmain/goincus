@@ -140,6 +140,24 @@ func (c *Client) GetInstanceUsage(ctx context.Context, idOrName string, days int
 	return &out, nil
 }
 
+// GetMetrics GET /api/v1/metrics?hours=N (all instances) or /instances/{id}/metrics.
+func (c *Client) GetMetrics(ctx context.Context, idOrName string, hours int) (*models.MetricsChartResponse, error) {
+	var out models.MetricsChartResponse
+	var path string
+	if strings.TrimSpace(idOrName) == "" {
+		path = "/api/v1/metrics"
+	} else {
+		path = "/api/v1/instances/" + url.PathEscape(idOrName) + "/metrics"
+	}
+	if hours > 0 {
+		path += "?hours=" + fmt.Sprintf("%d", hours)
+	}
+	if err := c.do(ctx, http.MethodGet, path, nil, &out, true); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // CreateInstance POST /api/v1/instances/
 func (c *Client) CreateInstance(ctx context.Context, req models.CreateInstanceRequest) (*models.Instance, error) {
 	var out models.Instance

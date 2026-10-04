@@ -678,21 +678,60 @@ func (c *Client) NetworkBytesTotal(name string) (int64, error) {
 // DiskUsageBytes returns root disk usage and total size from instance state.
 // When Total is unset, total is 0 and the caller may fall back to the configured quota.
 func (c *Client) DiskUsageBytes(name string) (used, total int64, err error) {
-	st, _, err := c.server.GetInstanceState(name)
+	sample, err := c.ResourceSample(name)
 	if err != nil {
 		return 0, 0, err
 	}
-	if st == nil || st.Disk == nil {
-		return 0, 0, nil
+	return sample.DiskUsedBytes, sample.DiskTotalBytes, nil
+}
+
+// ResourceSample is a point-in-time reading of guest resource counters.
+type ResourceSample struct {
+	CPUUsageNS      int64
+	MemoryUsedBytes int64
+	MemoryTotalBytes int64
+	DiskUsedBytes   int64
+	DiskTotalBytes  int64
+	NetBytesTotal   int64
+}
+
+// ResourceSample reads CPU/memory/disk/network counters from instance state in one call.
+func (c *Client) ResourceSample(name string) (ResourceSample, error) {
+	var out ResourceSample
+	st, _, err := c.server.GetInstanceState(name)
+	if err != nil {
+		return out, err
 	}
-	if d, ok := st.Disk["root"]; ok {
-		return d.Usage, d.Total, nil
+	if st == nil {
+		return out, nil
 	}
-	for _, d := range st.Disk {
-		used += d.Usage
-		total += d.Total
+	out.CPUUsageNS = st.CPU.Usage
+	out.MemoryUsedBytes = st.Memory.Usage
+	out.MemoryTotalBytes = st.Memory.Total
+	if st.Disk != nil {
+		if d, ok := st.Disk["root"]; ok {
+			out.DiskUsedBytes = d.Usage
+			out.DiskTotalBytes = d.Total
+		} else {
+			for _, d := range st.Disk {
+				out.DiskUsedBytes += d.Usage
+				out.DiskTotalBytes += d.Total
+			}
+		}
 	}
-	return used, total, nil
+	if st.Network != nil {
+		if nic, ok := st.Network["eth0"]; ok {
+			out.NetBytesTotal = nic.Counters.BytesReceived + nic.Counters.BytesSent
+		} else {
+			for ifname, n := range st.Network {
+				if ifname == "lo" {
+					continue
+				}
+				out.NetBytesTotal += n.Counters.BytesReceived + n.Counters.BytesSent
+			}
+		}
+	}
+	return out, nil
 }
 
 // EnsureDiskIsolation applies sysfs overlays so guests cannot list host disks via lsblk.

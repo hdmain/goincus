@@ -11,8 +11,6 @@ import (
 	"github.com/hdmain/goincus/internal/models"
 )
 
-const dailyUsageRetentionDays = 400
-
 // GetUsageChart returns daily disk + bandwidth points for charts.
 // days is the lookback window ending today UTC (default 30, max 366).
 func (s *Service) GetUsageChart(ctx context.Context, id uuid.UUID, days int) (*models.UsageChartResponse, error) {
@@ -130,7 +128,11 @@ func (s *Service) recordDailyUsage(ctx context.Context, inst *models.Instance, m
 }
 
 func (s *Service) purgeOldDailyUsage(ctx context.Context) {
-	before := time.Now().UTC().AddDate(0, 0, -dailyUsageRetentionDays)
+	days := s.cfg.Usage.DailyRetentionDays
+	if days <= 0 {
+		days = 400
+	}
+	before := time.Now().UTC().AddDate(0, 0, -days)
 	if err := s.store.PurgeOldDailyUsage(ctx, before); err != nil {
 		s.logger.Warn("purge daily usage", "err", err)
 	}
