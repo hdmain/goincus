@@ -85,6 +85,10 @@ func HardenedNIC(network, ipv4 string) map[string]string {
 	return nic
 }
 
+// OverQuotaThrottleLimit is applied when a VPS exceeds its monthly transfer quota.
+// Keeps a trickle for SSH/control traffic while blocking bulk use.
+const OverQuotaThrottleLimit = "8kbit"
+
 // ApplyNICBandwidth sets eth0 Incus I/O limits (Mbit/s both directions).
 // mbps <= 0 clears limits (unlimited). Uses limits.max so ingress and egress share one cap.
 func ApplyNICBandwidth(nic map[string]string, mbps int) {
@@ -98,6 +102,20 @@ func ApplyNICBandwidth(nic map[string]string, mbps int) {
 		return
 	}
 	nic["limits.max"] = fmt.Sprintf("%dMbit", mbps)
+}
+
+// ApplyNICNetworkPolicy sets rate limit or over-quota throttle on eth0.
+func ApplyNICNetworkPolicy(nic map[string]string, bandwidthMbps int, throttled bool) {
+	if throttled {
+		if nic == nil {
+			return
+		}
+		delete(nic, "limits.ingress")
+		delete(nic, "limits.egress")
+		nic["limits.max"] = OverQuotaThrottleLimit
+		return
+	}
+	ApplyNICBandwidth(nic, bandwidthMbps)
 }
 
 // EnsureUnprivilegedProfile creates or updates the hardened multi-tenant profile.

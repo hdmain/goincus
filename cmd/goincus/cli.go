@@ -78,11 +78,11 @@ func runList(args []string) int {
 		return printJSON(list)
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATUS\tCPU\tMEM\tDISK\tBW\tPORTS\tID")
+	fmt.Fprintln(w, "NAME\tSTATUS\tCPU\tMEM\tDISK\tBW\tTRAFFIC\tPORTS\tID")
 	for _, inst := range list {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%dMB\t%dGB\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%dMB\t%dGB\t%s\t%s\t%s\t%s\n",
 			inst.Name, inst.Status, formatCPU(inst.CPUCores), inst.MemoryMB, inst.StorageGB,
-			formatBandwidth(inst.BandwidthMbps), apicli.PortRange(&inst), shortID(inst.ID.String()))
+			formatBandwidth(inst.BandwidthMbps), formatTraffic(&inst), apicli.PortRange(&inst), shortID(inst.ID.String()))
 	}
 	_ = w.Flush()
 	return 0
@@ -122,6 +122,7 @@ func runCreate(args []string) int {
 	mem := fs.Int("memory", 0, "memory MiB (0 = server default)")
 	disk := fs.Int("disk", 0, "disk GiB (0 = server default)")
 	bw := fs.Int("bandwidth", 0, "NIC bandwidth Mbit/s both ways (0=server default, -1=unlimited)")
+	traffic := fs.Int("traffic", 0, "monthly transfer GiB rx+tx (0=server default, -1=unlimited)")
 	image := fs.String("image", "", "image alias (default from server config)")
 	wait := fs.Bool("wait", true, "wait until running with ports")
 	timeout := fs.Duration("timeout", 10*time.Minute, "max wait with -wait")
@@ -130,7 +131,7 @@ func runCreate(args []string) int {
 		name = rest[0]
 	}
 	if name == "" {
-		fmt.Fprintln(os.Stderr, "usage: goincus create <name> [-cpu 0.5|1|2] [-memory MiB] [-disk GiB] [-bandwidth Mbit] [-image ALIAS] [-wait=false]")
+		fmt.Fprintln(os.Stderr, "usage: goincus create <name> [-cpu 0.5|1|2] [-memory MiB] [-disk GiB] [-bandwidth Mbit] [-traffic GiB] [-image ALIAS] [-wait=false]")
 		return 2
 	}
 	cli, err := newAPIClient(f)
@@ -138,12 +139,13 @@ func runCreate(args []string) int {
 		return cliErr(err)
 	}
 	req := models.CreateInstanceRequest{
-		Name:          name,
-		CPUCores:      *cpu,
-		MemoryMB:      *mem,
-		StorageGB:     *disk,
-		BandwidthMbps: *bw,
-		Image:         *image,
+		Name:             name,
+		CPUCores:         *cpu,
+		MemoryMB:         *mem,
+		StorageGB:        *disk,
+		BandwidthMbps:    *bw,
+		TrafficMonthlyGB: *traffic,
+		Image:            *image,
 	}
 	inst, err := cli.CreateInstance(context.Background(), req)
 	if err != nil {
@@ -306,6 +308,7 @@ func printInstance(inst *models.Instance) {
 	fmt.Printf("status:     %s\n", inst.Status)
 	fmt.Printf("image:      %s\n", inst.Image)
 	fmt.Printf("resources:  %s CPU / %d MiB / %d GiB / %s\n", formatCPU(inst.CPUCores), inst.MemoryMB, inst.StorageGB, formatBandwidth(inst.BandwidthMbps))
+	fmt.Printf("traffic:    %s (%s)\n", formatTraffic(inst), inst.TrafficPeriod)
 	fmt.Printf("ports:      %s (%d mapped)\n", apicli.PortRange(inst), len(inst.Ports))
 	if p := apicli.SSHPort(inst); p > 0 {
 		fmt.Printf("ssh_port:   %d\n", p)
@@ -351,6 +354,20 @@ func formatBandwidth(mbps int) string {
 		return "unlimited"
 	}
 	return fmt.Sprintf("%dMbit", mbps)
+}
+
+func formatTraffic(inst *models.Instance) string {
+	used := float64(inst.TrafficUsedBytes) / (1024 * 1024 * 1024)
+	var s string
+	if inst.TrafficMonthlyGB <= 0 {
+		s = fmt.Sprintf("%.2f/∞ GiB", used)
+	} else {
+		s = fmt.Sprintf("%.2f/%d GiB", used, inst.TrafficMonthlyGB)
+	}
+	if inst.TrafficThrottled {
+		s += " throttled"
+	}
+	return s
 }
 
 // splitNameAndFlags pulls a leading positional name so flags may follow it.

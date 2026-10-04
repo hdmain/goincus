@@ -210,6 +210,7 @@ func runServe(args []string) int {
 	}
 
 	svc := service.New(cfg, store, rdb, incusCli, allocator, logger)
+	svc.StartBackgroundJobs(ctx)
 	srv := api.New(cfg, svc)
 
 	httpServer := &http.Server{

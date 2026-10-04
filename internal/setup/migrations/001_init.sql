@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS instances (
     storage_gb    INTEGER NOT NULL CHECK (storage_gb >= 1),
     processes     INTEGER NOT NULL DEFAULT 512 CHECK (processes >= 1),
     bandwidth_mbps INTEGER NOT NULL DEFAULT 100 CHECK (bandwidth_mbps >= 0),
+    traffic_monthly_gb INTEGER NOT NULL DEFAULT 1024 CHECK (traffic_monthly_gb >= 0),
+    traffic_used_bytes BIGINT NOT NULL DEFAULT 0 CHECK (traffic_used_bytes >= 0),
+    traffic_counter_snap BIGINT NOT NULL DEFAULT 0 CHECK (traffic_counter_snap >= 0),
+    traffic_period TEXT NOT NULL DEFAULT '',
+    traffic_throttled BOOLEAN NOT NULL DEFAULT FALSE,
     error_message TEXT NOT NULL DEFAULT '',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()

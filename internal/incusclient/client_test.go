@@ -88,6 +88,14 @@ func TestApplyNICBandwidth(t *testing.T) {
 	if _, ok := nic["limits.max"]; ok {
 		t.Fatal("limits.max should be cleared for unlimited")
 	}
+	ApplyNICNetworkPolicy(nic, 100, true)
+	if nic["limits.max"] != OverQuotaThrottleLimit {
+		t.Fatalf("throttled = %q, want %q", nic["limits.max"], OverQuotaThrottleLimit)
+	}
+	ApplyNICNetworkPolicy(nic, 200, false)
+	if nic["limits.max"] != "200Mbit" {
+		t.Fatalf("restored = %q, want 200Mbit", nic["limits.max"])
+	}
 }
 
 func TestSanitizeProfiles(t *testing.T) {

@@ -198,7 +198,7 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 		return fmt.Errorf("allocate static ipv4: %w", err)
 	}
 	eth0 := HardenedNIC(c.cfg.Network, ip)
-	ApplyNICBandwidth(eth0, args.BandwidthMbps)
+	ApplyNICNetworkPolicy(eth0, args.BandwidthMbps, false)
 
 	req := api.InstancesPost{
 		Name: args.Name,
@@ -549,7 +549,8 @@ func (c *Client) RemoveProxyDevice(instanceName, deviceName string) error {
 }
 
 // UpdateResourceLimits adjusts CPU/memory/process and NIC bandwidth limits.
-func (c *Client) UpdateResourceLimits(name string, cpuCores float64, memoryMB, processes, bandwidthMbps int) error {
+// When trafficThrottled is true, eth0 is capped to OverQuotaThrottleLimit instead of bandwidthMbps.
+func (c *Client) UpdateResourceLimits(name string, cpuCores float64, memoryMB, processes, bandwidthMbps int, trafficThrottled bool) error {
 	inst, etag, err := c.server.GetInstance(name)
 	if err != nil {
 		return err
@@ -584,7 +585,7 @@ func (c *Client) UpdateResourceLimits(name string, cpuCores float64, memoryMB, p
 	if eth0["name"] == "" {
 		eth0["name"] = "eth0"
 	}
-	ApplyNICBandwidth(eth0, bandwidthMbps)
+	ApplyNICNetworkPolicy(eth0, bandwidthMbps, trafficThrottled)
 	inst.Devices["eth0"] = eth0
 
 	op, err := c.server.UpdateInstance(name, inst.Writable(), etag)
@@ -592,6 +593,86 @@ func (c *Client) UpdateResourceLimits(name string, cpuCores float64, memoryMB, p
 		return err
 	}
 	return op.Wait()
+}
+
+// ApplyNetworkPolicy updates only eth0 rate/throttle limits.
+func (c *Client) ApplyNetworkPolicy(name string, bandwidthMbps int, trafficThrottled bool) error {
+	inst, etag, err := c.server.GetInstance(name)
+	if err != nil {
+		return err
+	}
+	if inst.Devices == nil {
+		inst.Devices = map[string]map[string]string{}
+	}
+	eth0, ok := inst.Devices["eth0"]
+	if !ok {
+		eth0 = map[string]string{}
+		if expanded := inst.ExpandedDevices["eth0"]; expanded != nil {
+			for k, v := range expanded {
+				eth0[k] = v
+			}
+		}
+	}
+	if eth0["type"] == "" {
+		eth0["type"] = "nic"
+	}
+	if eth0["name"] == "" {
+		eth0["name"] = "eth0"
+	}
+	want := map[string]string{}
+	for k, v := range eth0 {
+		want[k] = v
+	}
+	ApplyNICNetworkPolicy(want, bandwidthMbps, trafficThrottled)
+	changed := false
+	for k, v := range want {
+		if eth0[k] != v {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		if _, ok := eth0["limits.max"]; ok != (want["limits.max"] != "") {
+			changed = true
+		}
+		if eth0["limits.max"] != want["limits.max"] {
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	inst.Devices["eth0"] = want
+	op, err := c.server.UpdateInstance(name, inst.Writable(), etag)
+	if err != nil {
+		return err
+	}
+	return op.Wait()
+}
+
+// NetworkBytesTotal returns eth0 BytesReceived+BytesSent from instance state.
+// Returns 0 when the instance is not running or has no eth0 yet.
+func (c *Client) NetworkBytesTotal(name string) (int64, error) {
+	st, _, err := c.server.GetInstanceState(name)
+	if err != nil {
+		return 0, err
+	}
+	if st == nil || st.Network == nil {
+		return 0, nil
+	}
+	nic, ok := st.Network["eth0"]
+	if !ok {
+		// Sum all non-loopback NICs as a fallback.
+		var total int64
+		for ifname, n := range st.Network {
+			if ifname == "lo" {
+				continue
+			}
+			total += n.Counters.BytesReceived + n.Counters.BytesSent
+		}
+		return total, nil
+	}
+	return nic.Counters.BytesReceived + nic.Counters.BytesSent, nil
 }
 
 // EnsureDiskIsolation applies sysfs overlays so guests cannot list host disks via lsblk.

@@ -81,6 +81,8 @@ type DefaultsConfig struct {
 	Processes int     `yaml:"processes"`
 	// BandwidthMbps is eth0 max Mbit/s both directions (0 = unlimited).
 	BandwidthMbps int `yaml:"bandwidth_mbps"`
+	// TrafficMonthlyGB is calendar-month transfer quota in GiB (rx+tx). 0 = unlimited.
+	TrafficMonthlyGB int `yaml:"traffic_monthly_gb"`
 }
 
 // Addr returns the HTTP listen address.
@@ -181,11 +183,12 @@ func Default() *Config {
 			PortsPerInstance: 20,
 		},
 		Defaults: DefaultsConfig{
-			CPUCores:      1,
-			MemoryMB:      512,
-			StorageGB:     10,
-			Processes:     512,
-			BandwidthMbps: 100,
+			CPUCores:         1,
+			MemoryMB:         512,
+			StorageGB:        10,
+			Processes:        512,
+			BandwidthMbps:    100,
+			TrafficMonthlyGB: 1024,
 		},
 	}
 }
@@ -248,6 +251,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Defaults.BandwidthMbps < 0 {
 		return fmt.Errorf("defaults.bandwidth_mbps must be >= 0 (0 = unlimited)")
+	}
+	if c.Defaults.TrafficMonthlyGB < 0 {
+		return fmt.Errorf("defaults.traffic_monthly_gb must be >= 0 (0 = unlimited)")
 	}
 	if len(c.Auth.APIKeys) == 0 {
 		return fmt.Errorf("auth.api_keys must contain at least one key (run: goincus init)")

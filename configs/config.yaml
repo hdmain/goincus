@@ -54,3 +54,5 @@ defaults:
   processes: 512
   # eth0 max Mbit/s both directions (Incus limits.max). 0 = unlimited.
   bandwidth_mbps: 100
+  # Calendar-month transfer quota (GiB, rx+tx). 0 = unlimited. Over-quota → 8kbit throttle.
+  traffic_monthly_gb: 1024

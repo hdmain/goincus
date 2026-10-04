@@ -133,6 +133,15 @@ func (s *Service) CreateInstance(ctx context.Context, req models.CreateInstanceR
 	case bw < -1:
 		return nil, fmt.Errorf("%w: bandwidth_mbps must be >= -1 (Mbit/s; -1=unlimited, 0=default)", ErrInvalidInput)
 	}
+	trafficGB := req.TrafficMonthlyGB
+	switch {
+	case trafficGB == 0:
+		trafficGB = s.cfg.Defaults.TrafficMonthlyGB
+	case trafficGB == -1:
+		trafficGB = 0 // unlimited
+	case trafficGB < -1:
+		return nil, fmt.Errorf("%w: traffic_monthly_gb must be >= -1 (GiB/month; -1=unlimited, 0=default)", ErrInvalidInput)
+	}
 	image := req.Image
 	if image == "" {
 		image = s.cfg.Incus.DefaultImage
@@ -153,15 +162,17 @@ func (s *Service) CreateInstance(ctx context.Context, req models.CreateInstanceR
 		IncusName:    incusName,
 		Image:        image,
 		Status:       models.StatusPending,
-		CPUCores:      cpu,
-		MemoryMB:      mem,
-		StorageGB:     storage,
-		Processes:     procs,
-		BandwidthMbps: bw,
-		RootPassword:  rootPass,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		Ports:        []models.PortMapping{},
+		CPUCores:         cpu,
+		MemoryMB:         mem,
+		StorageGB:        storage,
+		Processes:        procs,
+		BandwidthMbps:    bw,
+		TrafficMonthlyGB: trafficGB,
+		TrafficPeriod:    CurrentTrafficPeriod(now),
+		RootPassword:     rootPass,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		Ports:            []models.PortMapping{},
 	}
 
 	if err := s.store.CreateInstance(ctx, inst); err != nil {
@@ -499,7 +510,7 @@ func (s *Service) StartInstance(ctx context.Context, id uuid.UUID) (*models.Inst
 		}
 		return nil, err
 	}
-	if err := s.incus.UpdateResourceLimits(inst.IncusName, inst.CPUCores, inst.MemoryMB, inst.Processes, inst.BandwidthMbps); err != nil {
+	if err := s.incus.UpdateResourceLimits(inst.IncusName, inst.CPUCores, inst.MemoryMB, inst.Processes, inst.BandwidthMbps, inst.TrafficThrottled); err != nil {
 		s.logger.Warn("apply resource limits", "incus", inst.IncusName, "err", err)
 	}
 	if err := s.incus.EnsureDiskIsolation(inst.IncusName); err != nil {
