@@ -1115,6 +1115,42 @@ Description: Incus NAT VPS provisioning REST API
  instances using Incus, with dynamic host port mapping and resource limits.
 
 Package: goincus
+Version: 0.0.40
+Architecture: arm64
+Maintainer: hdmain <noreply@github.com>
+Depends: systemd
+Recommends: curl, ca-certificates, lvm2, thin-provisioning-tools
+Filename: pool/main/goincus_0.0.40_arm64.deb
+Size: 3718896
+MD5sum: d19e4a69b46415c6a7a3249732c9a521
+SHA1: 0f2eb106b0bf63e8a3027a329ad54043b9cefd93
+SHA256: 90fdc47198c63b6226477e031bb496a2d3623ff710b5c0d752b8b1eb9c847277
+Section: admin
+Priority: optional
+Homepage: https://github.com/hdmain/goincus
+Description: Incus NAT VPS provisioning REST API
+ goincus provisions and lifecycle-manages isolated LXC containers as NAT VPS
+ instances using Incus, with dynamic host port mapping and resource limits.
+
+Package: goincus
+Version: 0.0.40
+Architecture: amd64
+Maintainer: hdmain <noreply@github.com>
+Depends: systemd
+Recommends: curl, ca-certificates, lvm2, thin-provisioning-tools
+Filename: pool/main/goincus_0.0.40_amd64.deb
+Size: 4127216
+MD5sum: 31fa4c7551b321a91269caa2e2dd7b78
+SHA1: ffb110ea756b0083e806955c4dd936ab38ee086b
+SHA256: 493d6153eedd42e999f773588c4868aacfb61cd6305edff429b7874f1bdebdd2
+Section: admin
+Priority: optional
+Homepage: https://github.com/hdmain/goincus
+Description: Incus NAT VPS provisioning REST API
+ goincus provisions and lifecycle-manages isolated LXC containers as NAT VPS
+ instances using Incus, with dynamic host port mapping and resource limits.
+
+Package: goincus
 Version: 0.0.5
 Architecture: arm64
 Maintainer: hdmain <noreply@github.com>
