@@ -165,3 +165,43 @@ func (a *Allocator) Reserve(ctx context.Context, port int) error {
 func (a *Allocator) Release(ctx context.Context, port int) error {
 	return a.redis.ReleasePort(ctx, port)
 }
+
+// Stats summarizes host-port capacity from the configured range and DB allocations.
+type Stats struct {
+	RangeStart       int
+	RangeEnd         int
+	PortsPerInstance int
+	Total            int
+	Used             int
+	Free             int
+}
+
+// Stats returns total/used/free host ports in the configured range.
+func (a *Allocator) Stats(ctx context.Context) (Stats, error) {
+	total := a.cfg.HostRangeEnd - a.cfg.HostRangeStart + 1
+	if total < 0 {
+		total = 0
+	}
+	usedPorts, err := a.store.ListUsedHostPorts(ctx)
+	if err != nil {
+		return Stats{}, err
+	}
+	used := 0
+	for _, p := range usedPorts {
+		if p >= a.cfg.HostRangeStart && p <= a.cfg.HostRangeEnd {
+			used++
+		}
+	}
+	free := total - used
+	if free < 0 {
+		free = 0
+	}
+	return Stats{
+		RangeStart:       a.cfg.HostRangeStart,
+		RangeEnd:         a.cfg.HostRangeEnd,
+		PortsPerInstance: a.cfg.PortsPerInstance,
+		Total:            total,
+		Used:             used,
+		Free:             free,
+	}, nil
+}

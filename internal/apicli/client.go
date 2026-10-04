@@ -158,6 +158,15 @@ func (c *Client) GetMetrics(ctx context.Context, idOrName string, hours int) (*m
 	return &out, nil
 }
 
+// GetHostStats GET /api/v1/hoststats
+func (c *Client) GetHostStats(ctx context.Context) (*models.HostStatsResponse, error) {
+	var out models.HostStatsResponse
+	if err := c.do(ctx, http.MethodGet, "/api/v1/hoststats", nil, &out, true); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // CreateInstance POST /api/v1/instances/
 func (c *Client) CreateInstance(ctx context.Context, req models.CreateInstanceRequest) (*models.Instance, error) {
 	var out models.Instance

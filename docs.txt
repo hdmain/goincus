@@ -30,6 +30,7 @@ ENDPOINTS (summary)
   GET    /api/v1/health
 
   GET    /api/v1/metrics?hours=24
+  GET    /api/v1/hoststats
   GET    /api/v1/instances/
   POST   /api/v1/instances/
   GET    /api/v1/instances/{id|name}
@@ -293,6 +294,39 @@ bandwidth_bytes is rx+tx transferred in that hour bucket.
 
 
 ------------------------------------------------------------------------------
+5c) HOST STATS (free ports + free disk)
+------------------------------------------------------------------------------
+
+GET /api/v1/hoststats
+
+Auth: required
+Status: 200
+
+Node capacity for this host:
+  ports  free/used/total in ports.host_range_* (DB allocations)
+  disk   free/used/total on the active Incus storage pool
+
+Response:
+  {
+    "ports": {
+      "range_start": 20000,
+      "range_end": 29999,
+      "ports_per_instance": 20,
+      "total": 10000,
+      "used": 40,
+      "free": 9960
+    },
+    "disk": {
+      "pool": "goincus",
+      "driver": "lvm",
+      "total_bytes": 214748364800,
+      "used_bytes": 21474836480,
+      "free_bytes": 193273528320
+    }
+  }
+
+
+------------------------------------------------------------------------------
 6) DELETE INSTANCE
 ------------------------------------------------------------------------------
 
@@ -419,6 +453,7 @@ CLI (talks to the same API)
   goincus start|stop|restart|repair <name|id>
   goincus usage <name|id> [-days 30] [-json]
   goincus metrics [name|id] [-hours 24] [-json]
+  goincus hoststats [-json]
   goincus ssh <name|id> [-host YOUR.PUBLIC.IP]
   goincus delete <name|id> [-y]
 
@@ -457,6 +492,10 @@ curl -s "http://127.0.0.1:9603/api/v1/metrics?hours=24" \
 
 # Hourly metrics — one VPS
 curl -s "http://127.0.0.1:9603/api/v1/instances/web-1/metrics?hours=24" \
+  -H "Authorization: Bearer gic_xxx"
+
+# Host capacity (free ports + free disk)
+curl -s http://127.0.0.1:9603/api/v1/hoststats \
   -H "Authorization: Bearer gic_xxx"
 
 # Stop / start

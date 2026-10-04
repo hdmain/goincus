@@ -43,6 +43,7 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/metrics", s.handleGetAllMetrics)
+		r.Get("/hoststats", s.handleGetHostStats)
 		r.Route("/instances", func(r chi.Router) {
 			r.Get("/", s.handleListInstances)
 			r.Post("/", s.handleCreateInstance)
@@ -135,6 +136,15 @@ func (s *Server) handleGetAllMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out, err := s.svc.GetHourlyMetrics(r.Context(), uuid.Nil, hours)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleGetHostStats(w http.ResponseWriter, r *http.Request) {
+	out, err := s.svc.GetHostStats(r.Context())
 	if err != nil {
 		writeServiceError(w, err)
 		return

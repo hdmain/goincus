@@ -145,3 +145,28 @@ type MetricsChartResponse struct {
 	To    string                  `json:"to"`
 	Items []InstanceMetricsSeries `json:"items"`
 }
+
+// HostStatsResponse is returned by GET /hoststats (node capacity).
+type HostStatsResponse struct {
+	Ports HostPortsStats `json:"ports"`
+	Disk  HostDiskStats  `json:"disk"`
+}
+
+// HostPortsStats is free/used host ports in the configured NAT range.
+type HostPortsStats struct {
+	RangeStart       int `json:"range_start"`
+	RangeEnd         int `json:"range_end"`
+	PortsPerInstance int `json:"ports_per_instance"`
+	Total            int `json:"total"`
+	Used             int `json:"used"`
+	Free             int `json:"free"`
+}
+
+// HostDiskStats is free/used space on the active Incus storage pool.
+type HostDiskStats struct {
+	Pool       string `json:"pool"`
+	Driver     string `json:"driver"`
+	TotalBytes int64  `json:"total_bytes"`
+	UsedBytes  int64  `json:"used_bytes"`
+	FreeBytes  int64  `json:"free_bytes"`
+}

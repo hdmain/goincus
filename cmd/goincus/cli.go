@@ -287,6 +287,29 @@ func runMetrics(args []string) int {
 	return 0
 }
 
+func runHostStats(args []string) int {
+	fs := flag.NewFlagSet("hoststats", flag.ExitOnError)
+	f, _ := parseCLIFlags(fs, args)
+	cli, err := newAPIClient(f)
+	if err != nil {
+		return cliErr(err)
+	}
+	out, err := cli.GetHostStats(context.Background())
+	if err != nil {
+		return cliErr(err)
+	}
+	if f.jsonOut {
+		return printJSON(out)
+	}
+	fmt.Printf("ports: %d free / %d total (used %d) range %d-%d (%d per instance)\n",
+		out.Ports.Free, out.Ports.Total, out.Ports.Used,
+		out.Ports.RangeStart, out.Ports.RangeEnd, out.Ports.PortsPerInstance)
+	fmt.Printf("disk:  %s free / %s total (used %s) pool %s (%s)\n",
+		formatBytes(out.Disk.FreeBytes), formatBytes(out.Disk.TotalBytes), formatBytes(out.Disk.UsedBytes),
+		out.Disk.Pool, out.Disk.Driver)
+	return 0
+}
+
 func runUsage(args []string) int {
 	name, flagArgs := splitNameAndFlags(args)
 	fs := flag.NewFlagSet("usage", flag.ExitOnError)

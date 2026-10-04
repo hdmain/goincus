@@ -77,6 +77,44 @@ func (c *Client) ActiveStoragePool() string {
 	return strings.TrimSpace(c.cfg.StoragePool)
 }
 
+// StoragePoolSpace is capacity reported by Incus for the active storage pool.
+type StoragePoolSpace struct {
+	Pool       string
+	Driver     string
+	TotalBytes uint64
+	UsedBytes  uint64
+	FreeBytes  uint64
+}
+
+// StoragePoolSpace returns total/used/free bytes for the active storage pool.
+func (c *Client) StoragePoolSpace() (StoragePoolSpace, error) {
+	name := c.ActiveStoragePool()
+	if name == "" {
+		name = quotaStoragePool
+	}
+	pool, _, err := c.server.GetStoragePool(name)
+	if err != nil {
+		return StoragePoolSpace{}, fmt.Errorf("get storage pool %q: %w", name, err)
+	}
+	res, err := c.server.GetStoragePoolResources(name)
+	if err != nil {
+		return StoragePoolSpace{}, fmt.Errorf("storage pool %q resources: %w", name, err)
+	}
+	total := res.Space.Total
+	used := res.Space.Used
+	var free uint64
+	if total >= used {
+		free = total - used
+	}
+	return StoragePoolSpace{
+		Pool:       name,
+		Driver:     pool.Driver,
+		TotalBytes: total,
+		UsedBytes:  used,
+		FreeBytes:  free,
+	}, nil
+}
+
 func uniquePoolNames(names ...string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(names))
