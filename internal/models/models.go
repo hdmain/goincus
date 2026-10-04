@@ -32,6 +32,8 @@ type Instance struct {
 	MemoryMB     int            `json:"memory_mb"`
 	StorageGB    int            `json:"storage_gb"`
 	Processes    int            `json:"processes"`
+	// BandwidthMbps is eth0 max for both directions (Incus limits.max). 0 = unlimited.
+	BandwidthMbps int           `json:"bandwidth_mbps"`
 	RootPassword string         `json:"root_password,omitempty"`
 	ErrorMessage string         `json:"error_message,omitempty"`
 	Ports        []PortMapping  `json:"ports,omitempty"`
@@ -58,6 +60,8 @@ type CreateInstanceRequest struct {
 	MemoryMB  int     `json:"memory_mb,omitempty"`
 	StorageGB int     `json:"storage_gb,omitempty"`
 	Processes int     `json:"processes,omitempty"`
+	// BandwidthMbps: 0 = server default, -1 = unlimited, >0 = Mbit/s both ways.
+	BandwidthMbps int `json:"bandwidth_mbps,omitempty"`
 	// InternalPorts is deprecated and ignored. Each VPS gets ports_per_instance
 	// contiguous ports mapped 1:1 (host:N → guest:N); sshd listens on the first.
 	InternalPorts []int `json:"internal_ports,omitempty"`

@@ -85,6 +85,21 @@ func HardenedNIC(network, ipv4 string) map[string]string {
 	return nic
 }
 
+// ApplyNICBandwidth sets eth0 Incus I/O limits (Mbit/s both directions).
+// mbps <= 0 clears limits (unlimited). Uses limits.max so ingress and egress share one cap.
+func ApplyNICBandwidth(nic map[string]string, mbps int) {
+	if nic == nil {
+		return
+	}
+	delete(nic, "limits.ingress")
+	delete(nic, "limits.egress")
+	if mbps <= 0 {
+		delete(nic, "limits.max")
+		return
+	}
+	nic["limits.max"] = fmt.Sprintf("%dMbit", mbps)
+}
+
 // EnsureUnprivilegedProfile creates or updates the hardened multi-tenant profile.
 func (c *Client) EnsureUnprivilegedProfile() error {
 	_ = EnsureHostIsolation()

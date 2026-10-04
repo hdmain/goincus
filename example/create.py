@@ -28,6 +28,7 @@ def main() -> None:
         "cpu_cores": 1,
         "memory_mb": 512,
         "storage_gb": 10,
+        "bandwidth_mbps": 100,  # eth0 limits.max both ways; -1 = unlimited
     }
     inst = client.request("POST", "/api/v1/instances", body)
     pretty(inst)

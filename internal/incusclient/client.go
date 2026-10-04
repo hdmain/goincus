@@ -158,14 +158,15 @@ func (c *Client) EnsureNetwork() (string, error) {
 
 // CreateArgs describes a new NAT VPS container.
 type CreateArgs struct {
-	Name         string
-	Image        string
-	CPUCores     float64
-	MemoryMB     int
-	StorageGB    int
-	Processes    int
-	Profiles     []string
-	RootPassword string
+	Name          string
+	Image         string
+	CPUCores      float64
+	MemoryMB      int
+	StorageGB     int
+	Processes     int
+	BandwidthMbps int // eth0 limits.max both ways; 0 = unlimited
+	Profiles      []string
+	RootPassword  string
 	// SSHPort is the guest sshd listen port (first port of the 1:1 block). 0 = 22.
 	SSHPort int
 }
@@ -197,6 +198,7 @@ func (c *Client) CreateContainer(args CreateArgs) error {
 		return fmt.Errorf("allocate static ipv4: %w", err)
 	}
 	eth0 := HardenedNIC(c.cfg.Network, ip)
+	ApplyNICBandwidth(eth0, args.BandwidthMbps)
 
 	req := api.InstancesPost{
 		Name: args.Name,
@@ -546,8 +548,8 @@ func (c *Client) RemoveProxyDevice(instanceName, deviceName string) error {
 	return op.Wait()
 }
 
-// UpdateResourceLimits adjusts CPU/memory/process limits on a running definition.
-func (c *Client) UpdateResourceLimits(name string, cpuCores float64, memoryMB, processes int) error {
+// UpdateResourceLimits adjusts CPU/memory/process and NIC bandwidth limits.
+func (c *Client) UpdateResourceLimits(name string, cpuCores float64, memoryMB, processes, bandwidthMbps int) error {
 	inst, etag, err := c.server.GetInstance(name)
 	if err != nil {
 		return err
@@ -563,6 +565,28 @@ func (c *Client) UpdateResourceLimits(name string, cpuCores float64, memoryMB, p
 		delete(inst.Config, "limits.cpu.allowance")
 	}
 	inst.Config["raw.lxc"] = MergeDiskIsolationRawLXC(inst.Config["raw.lxc"])
+
+	if inst.Devices == nil {
+		inst.Devices = map[string]map[string]string{}
+	}
+	eth0, ok := inst.Devices["eth0"]
+	if !ok {
+		eth0 = map[string]string{}
+		if expanded := inst.ExpandedDevices["eth0"]; expanded != nil {
+			for k, v := range expanded {
+				eth0[k] = v
+			}
+		}
+	}
+	if eth0["type"] == "" {
+		eth0["type"] = "nic"
+	}
+	if eth0["name"] == "" {
+		eth0["name"] = "eth0"
+	}
+	ApplyNICBandwidth(eth0, bandwidthMbps)
+	inst.Devices["eth0"] = eth0
+
 	op, err := c.server.UpdateInstance(name, inst.Writable(), etag)
 	if err != nil {
 		return err

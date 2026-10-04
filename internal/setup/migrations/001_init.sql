@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS instances (
     memory_mb     INTEGER NOT NULL CHECK (memory_mb >= 64),
     storage_gb    INTEGER NOT NULL CHECK (storage_gb >= 1),
     processes     INTEGER NOT NULL DEFAULT 512 CHECK (processes >= 1),
+    bandwidth_mbps INTEGER NOT NULL DEFAULT 100 CHECK (bandwidth_mbps >= 0),
     error_message TEXT NOT NULL DEFAULT '',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()

@@ -52,3 +52,5 @@ defaults:
   memory_mb: 512
   storage_gb: 10
   processes: 512
+  # eth0 max Mbit/s both directions (Incus limits.max). 0 = unlimited.
+  bandwidth_mbps: 100

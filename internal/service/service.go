@@ -124,6 +124,15 @@ func (s *Service) CreateInstance(ctx context.Context, req models.CreateInstanceR
 	if procs <= 0 {
 		procs = s.cfg.Defaults.Processes
 	}
+	bw := req.BandwidthMbps
+	switch {
+	case bw == 0:
+		bw = s.cfg.Defaults.BandwidthMbps
+	case bw == -1:
+		bw = 0 // unlimited
+	case bw < -1:
+		return nil, fmt.Errorf("%w: bandwidth_mbps must be >= -1 (Mbit/s; -1=unlimited, 0=default)", ErrInvalidInput)
+	}
 	image := req.Image
 	if image == "" {
 		image = s.cfg.Incus.DefaultImage
@@ -144,11 +153,12 @@ func (s *Service) CreateInstance(ctx context.Context, req models.CreateInstanceR
 		IncusName:    incusName,
 		Image:        image,
 		Status:       models.StatusPending,
-		CPUCores:     cpu,
-		MemoryMB:     mem,
-		StorageGB:    storage,
-		Processes:    procs,
-		RootPassword: rootPass,
+		CPUCores:      cpu,
+		MemoryMB:      mem,
+		StorageGB:     storage,
+		Processes:     procs,
+		BandwidthMbps: bw,
+		RootPassword:  rootPass,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		Ports:        []models.PortMapping{},
@@ -198,15 +208,16 @@ func (s *Service) provision(ctx context.Context, inst *models.Instance) {
 	}
 
 	if err := s.incus.CreateContainer(incusclient.CreateArgs{
-		Name:         inst.IncusName,
-		Image:        inst.Image,
-		CPUCores:     inst.CPUCores,
-		MemoryMB:     inst.MemoryMB,
-		StorageGB:    inst.StorageGB,
-		Processes:    inst.Processes,
-		Profiles:     s.cfg.Incus.Profiles,
-		RootPassword: inst.RootPassword,
-		SSHPort:      sshPort,
+		Name:          inst.IncusName,
+		Image:         inst.Image,
+		CPUCores:      inst.CPUCores,
+		MemoryMB:      inst.MemoryMB,
+		StorageGB:     inst.StorageGB,
+		Processes:     inst.Processes,
+		BandwidthMbps: inst.BandwidthMbps,
+		Profiles:      s.cfg.Incus.Profiles,
+		RootPassword:  inst.RootPassword,
+		SSHPort:       sshPort,
 	}); err != nil {
 		s.ports.ReleaseBlock(ctx, block)
 		s.fail(ctx, inst.ID, fmt.Errorf("create container: %w", err))
@@ -488,7 +499,7 @@ func (s *Service) StartInstance(ctx context.Context, id uuid.UUID) (*models.Inst
 		}
 		return nil, err
 	}
-	if err := s.incus.UpdateResourceLimits(inst.IncusName, inst.CPUCores, inst.MemoryMB, inst.Processes); err != nil {
+	if err := s.incus.UpdateResourceLimits(inst.IncusName, inst.CPUCores, inst.MemoryMB, inst.Processes, inst.BandwidthMbps); err != nil {
 		s.logger.Warn("apply resource limits", "incus", inst.IncusName, "err", err)
 	}
 	if err := s.incus.EnsureDiskIsolation(inst.IncusName); err != nil {

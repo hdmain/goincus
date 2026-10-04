@@ -71,6 +71,25 @@ func TestMergeDiskIsolationRawLXC(t *testing.T) {
 	}
 }
 
+func TestApplyNICBandwidth(t *testing.T) {
+	nic := map[string]string{
+		"type":            "nic",
+		"limits.ingress":  "1Gbit",
+		"limits.egress":   "1Gbit",
+	}
+	ApplyNICBandwidth(nic, 100)
+	if nic["limits.max"] != "100Mbit" {
+		t.Fatalf("limits.max = %q, want 100Mbit", nic["limits.max"])
+	}
+	if _, ok := nic["limits.ingress"]; ok {
+		t.Fatal("limits.ingress should be cleared when using limits.max")
+	}
+	ApplyNICBandwidth(nic, 0)
+	if _, ok := nic["limits.max"]; ok {
+		t.Fatal("limits.max should be cleared for unlimited")
+	}
+}
+
 func TestSanitizeProfiles(t *testing.T) {
 	got := sanitizeProfiles([]string{"default", "goincus-unprivileged", "other"})
 	if len(got) < 1 || got[0] != UnprivilegedProfile {

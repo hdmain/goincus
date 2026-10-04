@@ -78,11 +78,11 @@ func runList(args []string) int {
 		return printJSON(list)
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATUS\tCPU\tMEM\tDISK\tPORTS\tID")
+	fmt.Fprintln(w, "NAME\tSTATUS\tCPU\tMEM\tDISK\tBW\tPORTS\tID")
 	for _, inst := range list {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%dMB\t%dGB\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%dMB\t%dGB\t%s\t%s\t%s\n",
 			inst.Name, inst.Status, formatCPU(inst.CPUCores), inst.MemoryMB, inst.StorageGB,
-			apicli.PortRange(&inst), shortID(inst.ID.String()))
+			formatBandwidth(inst.BandwidthMbps), apicli.PortRange(&inst), shortID(inst.ID.String()))
 	}
 	_ = w.Flush()
 	return 0
@@ -121,6 +121,7 @@ func runCreate(args []string) int {
 	cpu := fs.Float64("cpu", 0, "CPU cores, supports fractions e.g. 0.5 (0 = server default)")
 	mem := fs.Int("memory", 0, "memory MiB (0 = server default)")
 	disk := fs.Int("disk", 0, "disk GiB (0 = server default)")
+	bw := fs.Int("bandwidth", 0, "NIC bandwidth Mbit/s both ways (0=server default, -1=unlimited)")
 	image := fs.String("image", "", "image alias (default from server config)")
 	wait := fs.Bool("wait", true, "wait until running with ports")
 	timeout := fs.Duration("timeout", 10*time.Minute, "max wait with -wait")
@@ -129,7 +130,7 @@ func runCreate(args []string) int {
 		name = rest[0]
 	}
 	if name == "" {
-		fmt.Fprintln(os.Stderr, "usage: goincus create <name> [-cpu 0.5|1|2] [-memory MiB] [-disk GiB] [-image ALIAS] [-wait=false]")
+		fmt.Fprintln(os.Stderr, "usage: goincus create <name> [-cpu 0.5|1|2] [-memory MiB] [-disk GiB] [-bandwidth Mbit] [-image ALIAS] [-wait=false]")
 		return 2
 	}
 	cli, err := newAPIClient(f)
@@ -137,11 +138,12 @@ func runCreate(args []string) int {
 		return cliErr(err)
 	}
 	req := models.CreateInstanceRequest{
-		Name:      name,
-		CPUCores:  *cpu,
-		MemoryMB:  *mem,
-		StorageGB: *disk,
-		Image:     *image,
+		Name:          name,
+		CPUCores:      *cpu,
+		MemoryMB:      *mem,
+		StorageGB:     *disk,
+		BandwidthMbps: *bw,
+		Image:         *image,
 	}
 	inst, err := cli.CreateInstance(context.Background(), req)
 	if err != nil {
@@ -303,7 +305,7 @@ func printInstance(inst *models.Instance) {
 	fmt.Printf("incus:      %s\n", inst.IncusName)
 	fmt.Printf("status:     %s\n", inst.Status)
 	fmt.Printf("image:      %s\n", inst.Image)
-	fmt.Printf("resources:  %s CPU / %d MiB / %d GiB\n", formatCPU(inst.CPUCores), inst.MemoryMB, inst.StorageGB)
+	fmt.Printf("resources:  %s CPU / %d MiB / %d GiB / %s\n", formatCPU(inst.CPUCores), inst.MemoryMB, inst.StorageGB, formatBandwidth(inst.BandwidthMbps))
 	fmt.Printf("ports:      %s (%d mapped)\n", apicli.PortRange(inst), len(inst.Ports))
 	if p := apicli.SSHPort(inst); p > 0 {
 		fmt.Printf("ssh_port:   %d\n", p)
@@ -342,6 +344,13 @@ func formatCPU(v float64) string {
 		return fmt.Sprintf("%g", v)
 	}
 	return fmt.Sprintf("%.2g", v)
+}
+
+func formatBandwidth(mbps int) string {
+	if mbps <= 0 {
+		return "unlimited"
+	}
+	return fmt.Sprintf("%dMbit", mbps)
 }
 
 // splitNameAndFlags pulls a leading positional name so flags may follow it.
