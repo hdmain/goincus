@@ -89,13 +89,35 @@ fi
 # MASQUERADE guest traffic leaving the host.
 $IPT -t nat -C POSTROUTING -s "$SUBNET" ! -d "$SUBNET" -j MASQUERADE 2>/dev/null \
   || $IPT -t nat -A POSTROUTING -s "$SUBNET" ! -d "$SUBNET" -j MASQUERADE
-# Allow forwarded traffic for the Incus bridge (Docker sets FORWARD DROP).
-$IPT -C FORWARD -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I FORWARD 1 -i "$BR" -j ACCEPT
-$IPT -C FORWARD -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I FORWARD 1 -o "$BR" -j ACCEPT
-# Docker's DOCKER-USER hook — accept Incus bridge traffic early.
+# Replace legacy broad FORWARD accepts (they expose Docker/Pterodactyl DNAT).
+while $IPT -D FORWARD -i "$BR" -j ACCEPT 2>/dev/null; do :; done
+while $IPT -D FORWARD -o "$BR" -j ACCEPT 2>/dev/null; do :; done
+while $IPT -D FORWARD -i "$BR" -j GOINCUS-BRIDGE-FWD 2>/dev/null; do :; done
+while $IPT -D FORWARD -o "$BR" -j GOINCUS-BRIDGE-REV 2>/dev/null; do :; done
+$IPT -N GOINCUS-BRIDGE-FWD 2>/dev/null || true
+$IPT -F GOINCUS-BRIDGE-FWD
+$IPT -A GOINCUS-BRIDGE-FWD -d 10.0.0.0/8 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -d 172.16.0.0/12 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -d 192.168.0.0/16 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -d 100.64.0.0/10 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -d 169.254.0.0/16 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -d 127.0.0.0/8 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -j ACCEPT
+$IPT -I FORWARD 1 -i "$BR" -j GOINCUS-BRIDGE-FWD
+$IPT -N GOINCUS-BRIDGE-REV 2>/dev/null || true
+$IPT -F GOINCUS-BRIDGE-REV
+if ! $IPT -A GOINCUS-BRIDGE-REV -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+  $IPT -A GOINCUS-BRIDGE-REV -m state --state RELATED,ESTABLISHED -j ACCEPT
+fi
+$IPT -A GOINCUS-BRIDGE-REV -j DROP
+$IPT -I FORWARD 1 -o "$BR" -j GOINCUS-BRIDGE-REV
 if $IPT -L DOCKER-USER -n >/dev/null 2>&1; then
-  $IPT -C DOCKER-USER -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -i "$BR" -j ACCEPT
-  $IPT -C DOCKER-USER -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -o "$BR" -j ACCEPT
+  while $IPT -D DOCKER-USER -i "$BR" -j ACCEPT 2>/dev/null; do :; done
+  while $IPT -D DOCKER-USER -o "$BR" -j ACCEPT 2>/dev/null; do :; done
+  while $IPT -D DOCKER-USER -i "$BR" -j DROP 2>/dev/null; do :; done
+  while $IPT -D DOCKER-USER -o "$BR" -j DROP 2>/dev/null; do :; done
+  $IPT -I DOCKER-USER 1 -i "$BR" -j DROP
+  $IPT -I DOCKER-USER 1 -o "$BR" -j DROP
 fi
 # Block guest → host management path on the bridge (SSH/API/DB).
 # Keep DHCP/DNS so Incus dnsmasq still works.

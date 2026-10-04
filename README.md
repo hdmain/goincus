@@ -74,6 +74,7 @@ Each VPS is an **unprivileged** Incus container with:
 - NIC MAC/IPv4/IPv6 filtering and bridge port isolation (no guest↔guest)
 - host block devices hidden from guest `lsblk` (`/sys/block` overlay; `df` still shows VPS quota)
 - host INPUT from the Incus bridge blocked except DHCP/DNS (no guest→host SSH/API)
+- guest FORWARD limited to public internet (no Docker/Pterodactyl/RFC1918 lateral via DNAT)
 - host sysctl hardening (`/etc/sysctl.d/99-goincus-isolation.conf`)
 
 Residual risk: all containers share the host kernel — a kernel 0-day can still escape. For stronger isolation use VMs/microVMs.

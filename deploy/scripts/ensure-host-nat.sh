@@ -64,11 +64,43 @@ IPT="$(command -v iptables-nft 2>/dev/null || command -v iptables || true)"
 
 $IPT -t nat -C POSTROUTING -s "$SUBNET" ! -d "$SUBNET" -j MASQUERADE 2>/dev/null \
   || $IPT -t nat -A POSTROUTING -s "$SUBNET" ! -d "$SUBNET" -j MASQUERADE
-$IPT -C FORWARD -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I FORWARD 1 -i "$BR" -j ACCEPT
-$IPT -C FORWARD -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I FORWARD 1 -o "$BR" -j ACCEPT
+
+# Drop legacy broad FORWARD accepts (they let guests hit Docker/Pterodactyl DNAT).
+while $IPT -D FORWARD -i "$BR" -j ACCEPT 2>/dev/null; do :; done
+while $IPT -D FORWARD -o "$BR" -j ACCEPT 2>/dev/null; do :; done
+while $IPT -D FORWARD -i "$BR" -j GOINCUS-BRIDGE-FWD 2>/dev/null; do :; done
+while $IPT -D FORWARD -o "$BR" -j GOINCUS-BRIDGE-REV 2>/dev/null; do :; done
+
+# Guest egress: public internet only. Block RFC1918/CGNAT/link-local so Docker
+# published ports (PREROUTING DNAT → 172.16/12) and other host bridges are unreachable.
+$IPT -N GOINCUS-BRIDGE-FWD 2>/dev/null || true
+$IPT -F GOINCUS-BRIDGE-FWD
+$IPT -A GOINCUS-BRIDGE-FWD -d 10.0.0.0/8 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -d 172.16.0.0/12 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -d 192.168.0.0/16 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -d 100.64.0.0/10 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -d 169.254.0.0/16 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -d 127.0.0.0/8 -j DROP
+$IPT -A GOINCUS-BRIDGE-FWD -j ACCEPT
+$IPT -I FORWARD 1 -i "$BR" -j GOINCUS-BRIDGE-FWD
+
+# Into guests: only return traffic (block docker/ptero → guest initiation).
+$IPT -N GOINCUS-BRIDGE-REV 2>/dev/null || true
+$IPT -F GOINCUS-BRIDGE-REV
+if ! $IPT -A GOINCUS-BRIDGE-REV -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+  $IPT -A GOINCUS-BRIDGE-REV -m state --state RELATED,ESTABLISHED -j ACCEPT
+fi
+$IPT -A GOINCUS-BRIDGE-REV -j DROP
+$IPT -I FORWARD 1 -o "$BR" -j GOINCUS-BRIDGE-REV
+
+# DOCKER-USER defense-in-depth (never ACCEPT the Incus bridge here).
 if $IPT -L DOCKER-USER -n >/dev/null 2>&1; then
-  $IPT -C DOCKER-USER -i "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -i "$BR" -j ACCEPT
-  $IPT -C DOCKER-USER -o "$BR" -j ACCEPT 2>/dev/null || $IPT -I DOCKER-USER 1 -o "$BR" -j ACCEPT
+  while $IPT -D DOCKER-USER -i "$BR" -j ACCEPT 2>/dev/null; do :; done
+  while $IPT -D DOCKER-USER -o "$BR" -j ACCEPT 2>/dev/null; do :; done
+  while $IPT -D DOCKER-USER -i "$BR" -j DROP 2>/dev/null; do :; done
+  while $IPT -D DOCKER-USER -o "$BR" -j DROP 2>/dev/null; do :; done
+  $IPT -I DOCKER-USER 1 -i "$BR" -j DROP
+  $IPT -I DOCKER-USER 1 -o "$BR" -j DROP
 fi
 
 # Guests must not reach host management services via the bridge gateway

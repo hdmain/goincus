@@ -92,6 +92,24 @@ fi
 echo "GUEST_TO_HOST_BLOCKED gw=$GW"
 '
 
+echo "== guest must not reach Docker/private bridges via FORWARD/DNAT =="
+incus exec "${INCUS}" -- bash -lc '
+set -e
+GW=$(ip -4 route show default | awk "/default/{print \$3; exit}")
+# Published Docker ports on the host are DNATed into 172.16/12 and must not be reachable.
+for ip in "$GW" 172.17.0.1 172.18.0.1; do
+  for p in 80 443 2375 2376 8781 9000 3306; do
+    if timeout 2 bash -c "echo >/dev/tcp/$ip/$p" 2>/dev/null; then
+      echo "FAIL: guest can reach private/docker path $ip:$p" >&2
+      exit 1
+    fi
+  done
+done
+getent hosts 1.1.1.1 >/dev/null
+ping -c1 -W2 1.1.1.1 >/dev/null
+echo "GUEST_TO_PRIVATE_BLOCKED"
+'
+
 echo "== host must not publish ports outside the block =="
 # pick a port just outside the block
 OUT=$((SSH + 20))
