@@ -1,6 +1,9 @@
 package incusclient
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestResourceConfig(t *testing.T) {
 	cfg := ResourceConfig(2, 1024, 256)
@@ -31,6 +34,20 @@ func TestHardenedInstanceConfig(t *testing.T) {
 		if got := cfg[k]; got != want {
 			t.Errorf("%s = %q, want %q", k, got, want)
 		}
+	}
+	if !strings.Contains(cfg["raw.lxc"], "tmpfs sys/block tmpfs") {
+		t.Fatal("raw.lxc must hide /sys/block from guests")
+	}
+}
+
+func TestMergeDiskIsolationRawLXC(t *testing.T) {
+	got := MergeDiskIsolationRawLXC("lxc.apparmor.profile = unconfined\n")
+	if !strings.Contains(got, "tmpfs sys/block tmpfs") || !strings.Contains(got, "apparmor") {
+		t.Fatalf("merge failed: %q", got)
+	}
+	again := MergeDiskIsolationRawLXC(got)
+	if strings.Count(again, "tmpfs sys/block tmpfs") != 1 {
+		t.Fatalf("duplicate mount entries: %q", again)
 	}
 }
 

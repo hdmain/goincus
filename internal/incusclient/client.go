@@ -545,6 +545,28 @@ func (c *Client) UpdateResourceLimits(name string, cpuCores, memoryMB, processes
 	}
 	// Drop legacy soft-weight key so cpuset from limits.cpu is the sole CPU control.
 	delete(inst.Config, "limits.cpu.allowance")
+	inst.Config["raw.lxc"] = MergeDiskIsolationRawLXC(inst.Config["raw.lxc"])
+	op, err := c.server.UpdateInstance(name, inst.Writable(), etag)
+	if err != nil {
+		return err
+	}
+	return op.Wait()
+}
+
+// EnsureDiskIsolation applies sysfs overlays so guests cannot list host disks via lsblk.
+func (c *Client) EnsureDiskIsolation(name string) error {
+	inst, etag, err := c.server.GetInstance(name)
+	if err != nil {
+		return err
+	}
+	if inst.Config == nil {
+		inst.Config = map[string]string{}
+	}
+	merged := MergeDiskIsolationRawLXC(inst.Config["raw.lxc"])
+	if strings.TrimSpace(inst.Config["raw.lxc"]) == strings.TrimSpace(merged) {
+		return nil
+	}
+	inst.Config["raw.lxc"] = merged
 	op, err := c.server.UpdateInstance(name, inst.Writable(), etag)
 	if err != nil {
 		return err

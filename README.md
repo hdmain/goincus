@@ -72,6 +72,7 @@ Each VPS is an **unprivileged** Incus container with:
 - Incus guest API disabled (`/dev/incus` not exposed)
 - default seccomp deny + no syscall intercept helpers
 - NIC MAC/IPv4/IPv6 filtering and bridge port isolation (no guest↔guest)
+- host block devices hidden from guest `lsblk` (`/sys/block` overlay; `df` still shows VPS quota)
 - host INPUT from the Incus bridge blocked except DHCP/DNS (no guest→host SSH/API)
 - host sysctl hardening (`/etc/sysctl.d/99-goincus-isolation.conf`)
 

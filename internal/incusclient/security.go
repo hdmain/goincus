@@ -10,6 +10,14 @@ import (
 	"github.com/lxc/incus/v6/shared/api"
 )
 
+// diskIsolationRawLXC hides host block topology from guest tools like lsblk.
+// Device nodes under /dev are already absent; lsblk still reads /sys/block and
+// would otherwise show the host's sda/loop devices.
+const diskIsolationRawLXC = `lxc.mount.entry = tmpfs sys/block tmpfs ro,size=64k,mode=755,create=dir 0 0
+lxc.mount.entry = tmpfs sys/dev/block tmpfs ro,size=64k,mode=755,create=dir 0 0
+lxc.mount.entry = tmpfs sys/class/block tmpfs ro,size=64k,mode=755,create=dir 0 0
+`
+
 // HardenedInstanceConfig returns security keys that confine a multi-tenant VPS guest.
 // Goal: unprivileged user namespace, no nesting, no Incus guest API, isolated idmap,
 // default seccomp deny, no syscall intercept (intercept widens attack surface).
@@ -29,7 +37,34 @@ func HardenedInstanceConfig() map[string]string {
 		"security.syscalls.intercept.sched_setscheduler": "false",
 		// Do not allow loading arbitrary kernel modules from the guest.
 		"linux.kernel_modules": "",
+		// Hide host disks from lsblk/sysfs (df still shows the VPS root quota).
+		"raw.lxc": diskIsolationRawLXC,
 	}
+}
+
+// MergeDiskIsolationRawLXC ensures disk-hiding mount entries exist in raw.lxc.
+func MergeDiskIsolationRawLXC(existing string) string {
+	existing = strings.TrimSpace(existing)
+	needles := []string{
+		"tmpfs sys/block tmpfs",
+		"tmpfs sys/dev/block tmpfs",
+		"tmpfs sys/class/block tmpfs",
+	}
+	out := existing
+	for i, needle := range needles {
+		if strings.Contains(out, needle) {
+			continue
+		}
+		line := strings.Split(strings.TrimSpace(diskIsolationRawLXC), "\n")[i]
+		if out != "" && !strings.HasSuffix(out, "\n") {
+			out += "\n"
+		}
+		out += line + "\n"
+	}
+	if out != "" && !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return out
 }
 
 // HardenedNIC returns eth0 settings that block MAC/IP spoofing and bridge hairpin to peers.

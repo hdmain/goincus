@@ -75,7 +75,10 @@ fi
 # (SSH/API/DB). Only DHCP + DNS for Incus dnsmasq, plus established replies.
 $IPT -N GOINCUS-BRIDGE-IN 2>/dev/null || true
 $IPT -F GOINCUS-BRIDGE-IN
-$IPT -A GOINCUS-BRIDGE-IN -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+# Prefer conntrack; fall back to legacy state match (some hosts lack xt_conntrack).
+if ! $IPT -A GOINCUS-BRIDGE-IN -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+  $IPT -A GOINCUS-BRIDGE-IN -m state --state RELATED,ESTABLISHED -j ACCEPT
+fi
 $IPT -A GOINCUS-BRIDGE-IN -p udp --dport 67 -j ACCEPT
 $IPT -A GOINCUS-BRIDGE-IN -p udp --dport 53 -j ACCEPT
 $IPT -A GOINCUS-BRIDGE-IN -p tcp --dport 53 -j ACCEPT
