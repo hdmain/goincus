@@ -1,32 +1,32 @@
 Architectures: amd64 arm64
 Codename: stable
 Components: main
-Date: Sun, 04 Oct 2026 19:06:07 +0000
+Date: Sun, 04 Oct 2026 19:06:37 +0000
 Description: goincus packages
 Label: goincus
 Origin: goincus
 Suite: stable
 MD5Sum:
- 8525ce3ab3edc262338e074125818e7c            43348 Packages
- d14970917107d9462053c1c31d6c13c9             7240 Packages.gz
- cbe45973917915ad06699920bae025f6              174 Release
+ 6cf5e5eb197bbd6636809039365f5bc6            44700 Packages
+ 564fed36e85032ddfa65b691fc72c959             7458 Packages.gz
+ 19894edbe7aa97fd0584e51d23702387              174 Release
  d41d8cd98f00b204e9800998ecf8427e                0 Translation-en
- 6dc5832d3b969f2ec7a47dae7ff8643c               35 Translation-en.gz
+ 377c916d5c0354cff7692c5f27cbdb22               35 Translation-en.gz
 SHA1:
- ea793f8ef99a8d6f4f801ef8b5fb9524061d0fea            43348 Packages
- e3bc90f1f34185d2c9b7d566f0e4564b4bbd3ff8             7240 Packages.gz
- dcc1dd7d8a203a63c49b12024dd92aa4afb41299              174 Release
+ 60233d8b45675e73e4de8ab25b390c83655b6ed7            44700 Packages
+ 5a45be4e0d1dcea25e761e901310283de78c911d             7458 Packages.gz
+ 90166bb4b3dc03fc9142f3154db2649bed5828b1              174 Release
  da39a3ee5e6b4b0d3255bfef95601890afd80709                0 Translation-en
- 9da20961f14665def68be2710f1cdf4bb482f1e7               35 Translation-en.gz
+ 375cee93b55fff0c9ae8d3f1cb2f5e9dd6794b16               35 Translation-en.gz
 SHA256:
- ef7b084ed591e5ff8602bb35bf2d4b64203245ba83b7504530c60785031f9389            43348 Packages
- 63ba0afb6caf3253623f8d0bbef837196bcb25c9cb8ac8623d471409b454d1fa             7240 Packages.gz
- 55dea751c11b9df8d77cdfa5917444e52aa247c183742b3b57862e8dd0cae7d5              174 Release
+ 08e5b5eaf5451da4fd9f52e13d46c95346896cdea4027fd431e66ecaa5b71035            44700 Packages
+ 6e1319d826254c2682e81aa9a9ee55fdcd0375dde62f9e7405d4b989d420b39d             7458 Packages.gz
+ 88c50ec4adfa38f5d8e98d139c5f5a3c7c16ebbc630376d8d1fae70346ed6664              174 Release
  e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855                0 Translation-en
- 6084a50ac4b6b9fb4940e2fd7b9960f9c0e1a6c603644913dd238da8ea591231               35 Translation-en.gz
+ a6a886a235e8a8ee262f55899fa0cb46cf02f8c4dca021618a3c50b25e60a58c               35 Translation-en.gz
 SHA512:
- 86e56ab807a121ef8fa6529cd30fed76f842d0cda93a052edee0a2646637bb82d649b0d83a31d70dd27758688fde8386508bfe6484b2ad25ae817cddd3b85213            43348 Packages
- ef9f982c8a1238286c09f96c843ad1f24f12be172c8371f015eeb34164299740e1ad0fadfbfcc7e864ebc03002a5b984efd6988ff5f579d6cdbe8f76596bd051             7240 Packages.gz
- 1860e3912af5858dfb854215dc271a579acf2a60016b76bb484dbfae9406fdd759246c0ab74cfd99edfcbdb049cec424f6d65618a13dfd7b9dc8a230e1a79059              174 Release
+ e265963c2b676ab8c39076990f03de951366cce8cf4b9ec4866371219bf38adef6a428261bdd068ab2f9c997736b44dde16c6f39ef866c1b501a5d15be93a448            44700 Packages
+ bdd4910281236562e027fc9d6e035daaf9b4621119b4202db18c57442f694ae1dd89a9b8fc087098681453799254b5d776a83a00f47976361a63b69d3311ba19             7458 Packages.gz
+ 92f9b0b385bac6aaa5be57cefef1ff2448576302eca4d4b39c68244ee92fc1e73a4c0e6f3ef81469858090d56438da1f387e8712fe1e6fde99988c035f59f549              174 Release
  cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e                0 Translation-en
- b9c9ffafb3f5b187bb5656c97547fe663f2405bd3ff4a1716752518d980eb72cd707c997470ff00904915e6c0d4249214df7c758b289302388258643a907b37b               35 Translation-en.gz
+ 4eb4e113a6ab4466136dd99f6adaddf84d4fe5013f27a16904617e70dd1d5352e1d9eab4bc36b9da260c5f935ff8dd49ea409564e6db3b996887d28ef8edcfd3               35 Translation-en.gz
