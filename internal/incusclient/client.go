@@ -675,6 +675,26 @@ func (c *Client) NetworkBytesTotal(name string) (int64, error) {
 	return nic.Counters.BytesReceived + nic.Counters.BytesSent, nil
 }
 
+// DiskUsageBytes returns root disk usage and total size from instance state.
+// When Total is unset, total is 0 and the caller may fall back to the configured quota.
+func (c *Client) DiskUsageBytes(name string) (used, total int64, err error) {
+	st, _, err := c.server.GetInstanceState(name)
+	if err != nil {
+		return 0, 0, err
+	}
+	if st == nil || st.Disk == nil {
+		return 0, 0, nil
+	}
+	if d, ok := st.Disk["root"]; ok {
+		return d.Usage, d.Total, nil
+	}
+	for _, d := range st.Disk {
+		used += d.Usage
+		total += d.Total
+	}
+	return used, total, nil
+}
+
 // EnsureDiskIsolation applies sysfs overlays so guests cannot list host disks via lsblk.
 func (c *Client) EnsureDiskIsolation(name string) error {
 	inst, etag, err := c.server.GetInstance(name)

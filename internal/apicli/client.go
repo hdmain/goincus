@@ -127,6 +127,19 @@ func (c *Client) GetInstance(ctx context.Context, idOrName string) (*models.Inst
 	return &out, nil
 }
 
+// GetInstanceUsage GET /api/v1/instances/{id}/usage?days=N
+func (c *Client) GetInstanceUsage(ctx context.Context, idOrName string, days int) (*models.UsageChartResponse, error) {
+	var out models.UsageChartResponse
+	path := "/api/v1/instances/" + url.PathEscape(idOrName) + "/usage"
+	if days > 0 {
+		path += "?days=" + fmt.Sprintf("%d", days)
+	}
+	if err := c.do(ctx, http.MethodGet, path, nil, &out, true); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // CreateInstance POST /api/v1/instances/
 func (c *Client) CreateInstance(ctx context.Context, req models.CreateInstanceRequest) (*models.Instance, error) {
 	var out models.Instance

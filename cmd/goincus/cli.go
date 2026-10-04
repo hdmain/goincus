@@ -250,6 +250,56 @@ func runAction(action string, args []string) int {
 	return 0
 }
 
+func runUsage(args []string) int {
+	name, flagArgs := splitNameAndFlags(args)
+	fs := flag.NewFlagSet("usage", flag.ExitOnError)
+	days := fs.Int("days", 30, "number of UTC days to return (max 366)")
+	f, rest := parseCLIFlags(fs, flagArgs)
+	if name == "" && len(rest) > 0 {
+		name = rest[0]
+	}
+	if name == "" {
+		fmt.Fprintln(os.Stderr, "usage: goincus usage <name-or-id> [-days 30]")
+		return 2
+	}
+	cli, err := newAPIClient(f)
+	if err != nil {
+		return cliErr(err)
+	}
+	out, err := cli.GetInstanceUsage(context.Background(), name, *days)
+	if err != nil {
+		return cliErr(err)
+	}
+	if f.jsonOut {
+		return printJSON(out)
+	}
+	fmt.Printf("instance: %s (%s)\n", out.Name, out.InstanceID)
+	fmt.Printf("range:    %s → %s (%d days)\n", out.From, out.To, out.Days)
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "DATE\tDISK_USED\tDISK_TOTAL\tBANDWIDTH")
+	for _, p := range out.Points {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			p.Date, formatBytes(p.DiskUsedBytes), formatBytes(p.DiskTotalBytes), formatBytes(p.BandwidthBytes))
+	}
+	_ = w.Flush()
+	return 0
+}
+
+func formatBytes(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%dB", n)
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	v := float64(n)
+	for _, u := range units {
+		v /= 1024
+		if v < 1024 {
+			return fmt.Sprintf("%.2f%s", v, u)
+		}
+	}
+	return fmt.Sprintf("%.2fTiB", v/1024)
+}
+
 func runSSHInfo(args []string) int {
 	name, flagArgs := splitNameAndFlags(args)
 	fs := flag.NewFlagSet("ssh", flag.ExitOnError)

@@ -45,6 +45,8 @@ func (s *Service) reconcileTraffic(ctx context.Context) {
 			s.logger.Warn("traffic reconcile", "name", inst.Name, "incus", inst.IncusName, "err", err)
 		}
 	}
+	// Cheap retention trim once per reconcile cycle.
+	s.purgeOldDailyUsage(ctx)
 }
 
 func (s *Service) reconcileInstanceTraffic(ctx context.Context, inst *models.Instance, period string) error {
@@ -95,16 +97,20 @@ func (s *Service) reconcileInstanceTraffic(ctx context.Context, inst *models.Ins
 		}
 	}
 
-	if !changed {
-		return nil
+	if changed {
+		if err := s.store.UpdateTrafficAccounting(ctx, inst.ID, used, snap, period, throttled); err != nil {
+			return err
+		}
+		inst.TrafficUsedBytes = used
+		inst.TrafficCounterSnap = snap
+		inst.TrafficPeriod = period
+		inst.TrafficThrottled = throttled
 	}
-	if err := s.store.UpdateTrafficAccounting(ctx, inst.ID, used, snap, period, throttled); err != nil {
-		return err
+
+	// Persist today's disk snapshot + daily bandwidth for charts.
+	if err := s.recordDailyUsage(ctx, inst, used); err != nil {
+		s.logger.Warn("daily usage sample", "name", inst.Name, "err", err)
 	}
-	inst.TrafficUsedBytes = used
-	inst.TrafficCounterSnap = snap
-	inst.TrafficPeriod = period
-	inst.TrafficThrottled = throttled
 	return nil
 }
 

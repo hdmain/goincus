@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -46,6 +47,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/", s.handleCreateInstance)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Get("/", s.handleGetInstance)
+				r.Get("/usage", s.handleGetInstanceUsage)
 				r.Delete("/", s.handleDeleteInstance)
 				r.Post("/start", s.handleStartInstance)
 				r.Post("/stop", s.handleStopInstance)
@@ -101,6 +103,26 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, inst)
+}
+
+func (s *Server) handleGetInstanceUsage(w http.ResponseWriter, r *http.Request) {
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	days := 30
+	if v := r.URL.Query().Get("days"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			days = parsed
+		}
+	}
+	out, err := s.svc.GetUsageChart(r.Context(), inst.ID, days)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {

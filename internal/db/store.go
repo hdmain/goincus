@@ -341,6 +341,85 @@ func (s *Store) UpdateTrafficAccounting(ctx context.Context, id uuid.UUID, used,
 	return err
 }
 
+// DailyUsageRow is one UTC day of stored usage samples.
+type DailyUsageRow struct {
+	InstanceID             uuid.UUID
+	Day                    time.Time
+	DiskUsedBytes          int64
+	DiskTotalBytes         int64
+	BandwidthBytes         int64
+	BandwidthBaselineBytes int64
+}
+
+// UpsertDailyUsage inserts or updates a daily usage sample.
+func (s *Store) UpsertDailyUsage(ctx context.Context, row DailyUsageRow) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO instance_daily_usage (
+			instance_id, day, disk_used_bytes, disk_total_bytes, bandwidth_bytes, bandwidth_baseline_bytes, created_at, updated_at
+		) VALUES ($1, $2::date, $3, $4, $5, $6, NOW(), NOW())
+		ON CONFLICT (instance_id, day) DO UPDATE SET
+			disk_used_bytes = EXCLUDED.disk_used_bytes,
+			disk_total_bytes = EXCLUDED.disk_total_bytes,
+			bandwidth_bytes = EXCLUDED.bandwidth_bytes,
+			bandwidth_baseline_bytes = EXCLUDED.bandwidth_baseline_bytes,
+			updated_at = NOW()`,
+		row.InstanceID, row.Day.UTC().Format("2006-01-02"),
+		row.DiskUsedBytes, row.DiskTotalBytes, row.BandwidthBytes, row.BandwidthBaselineBytes,
+	)
+	return err
+}
+
+// GetDailyUsage returns one day row or ErrNotFound.
+func (s *Store) GetDailyUsage(ctx context.Context, instanceID uuid.UUID, day time.Time) (*DailyUsageRow, error) {
+	const q = `
+		SELECT instance_id, day, disk_used_bytes, disk_total_bytes, bandwidth_bytes, bandwidth_baseline_bytes
+		FROM instance_daily_usage
+		WHERE instance_id = $1 AND day = $2::date`
+	var row DailyUsageRow
+	err := s.pool.QueryRow(ctx, q, instanceID, day.UTC().Format("2006-01-02")).Scan(
+		&row.InstanceID, &row.Day, &row.DiskUsedBytes, &row.DiskTotalBytes, &row.BandwidthBytes, &row.BandwidthBaselineBytes,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &row, nil
+}
+
+// ListDailyUsage returns samples in [from, to] inclusive (UTC dates), ascending.
+func (s *Store) ListDailyUsage(ctx context.Context, instanceID uuid.UUID, from, to time.Time) ([]DailyUsageRow, error) {
+	const q = `
+		SELECT instance_id, day, disk_used_bytes, disk_total_bytes, bandwidth_bytes, bandwidth_baseline_bytes
+		FROM instance_daily_usage
+		WHERE instance_id = $1 AND day >= $2::date AND day <= $3::date
+		ORDER BY day ASC`
+	rows, err := s.pool.Query(ctx, q, instanceID, from.UTC().Format("2006-01-02"), to.UTC().Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []DailyUsageRow
+	for rows.Next() {
+		var row DailyUsageRow
+		if err := rows.Scan(
+			&row.InstanceID, &row.Day, &row.DiskUsedBytes, &row.DiskTotalBytes, &row.BandwidthBytes, &row.BandwidthBaselineBytes,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// PurgeOldDailyUsage deletes samples older than before (UTC date).
+func (s *Store) PurgeOldDailyUsage(ctx context.Context, before time.Time) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM instance_daily_usage WHERE day < $1::date`, before.UTC().Format("2006-01-02"))
+	return err
+}
+
 // ListActiveInstances returns non-deleted instances in creating/running/stopped states for traffic jobs.
 func (s *Store) ListActiveInstances(ctx context.Context) ([]models.Instance, error) {
 	const q = `

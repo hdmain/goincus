@@ -101,3 +101,21 @@ type HealthResponse struct {
 	Incus    string            `json:"incus"`
 	Checks   map[string]string `json:"checks,omitempty"`
 }
+
+// DailyUsagePoint is one UTC day of disk + bandwidth samples for charts.
+type DailyUsagePoint struct {
+	Date            string `json:"date"` // YYYY-MM-DD (UTC)
+	DiskUsedBytes   int64  `json:"disk_used_bytes"`
+	DiskTotalBytes  int64  `json:"disk_total_bytes"`
+	BandwidthBytes  int64  `json:"bandwidth_bytes"` // rx+tx transferred that day
+}
+
+// UsageChartResponse is returned by GET /instances/{id}/usage.
+type UsageChartResponse struct {
+	InstanceID uuid.UUID         `json:"instance_id"`
+	Name       string            `json:"name"`
+	Days       int               `json:"days"`
+	From       string            `json:"from"`
+	To         string            `json:"to"`
+	Points     []DailyUsagePoint `json:"points"`
+}

@@ -133,8 +133,17 @@ goincus stop web-1
 goincus start web-1
 goincus restart web-1
 goincus repair web-1
+goincus usage web-1 -days 30          # daily disk + bandwidth for charts
 goincus delete web-1 -y
 ```
+
+Daily usage is sampled automatically (UTC day). API:
+
+```http
+GET /api/v1/instances/{id|name}/usage?days=30
+```
+
+Response `points[]` has `date`, `disk_used_bytes`, `disk_total_bytes`, `bandwidth_bytes` (rx+tx that day).
 
 Works the same on any host after `goincus init` — nothing is tied to a specific server.
 Remote API:
@@ -160,6 +169,7 @@ python example/repair.py http://127.0.0.1:9603 gic_xxx <id>
 python example/add_port.py http://127.0.0.1:9603 gic_xxx <id> 443
 python example/remove_port.py http://127.0.0.1:9603 gic_xxx <id> <port-id>
 python example/delete.py http://127.0.0.1:9603 gic_xxx <id>
+python example/usage.py http://127.0.0.1:9603 gic_xxx <id> 30
 ```
 
 ## License
