@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS instances (
     incus_name    TEXT NOT NULL UNIQUE,
     image         TEXT NOT NULL,
     status        TEXT NOT NULL DEFAULT 'pending',
-    cpu_cores     INTEGER NOT NULL CHECK (cpu_cores >= 1),
+    cpu_cores     NUMERIC(8,2) NOT NULL CHECK (cpu_cores >= 0.10),
     memory_mb     INTEGER NOT NULL CHECK (memory_mb >= 64),
     storage_gb    INTEGER NOT NULL CHECK (storage_gb >= 1),
     processes     INTEGER NOT NULL DEFAULT 512 CHECK (processes >= 1),

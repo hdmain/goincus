@@ -104,6 +104,14 @@ func (s *Service) CreateInstance(ctx context.Context, req models.CreateInstanceR
 	if cpu <= 0 {
 		cpu = s.cfg.Defaults.CPUCores
 	}
+	if cpu < 0.1 {
+		return nil, fmt.Errorf("%w: cpu_cores must be >= 0.1 (e.g. 0.5, 1, 2)", ErrInvalidInput)
+	}
+	// Avoid pathological float noise in DB/API (0.5000001 → 0.5).
+	cpu = float64(int(cpu*100+0.5)) / 100
+	if cpu < 0.1 {
+		cpu = 0.1
+	}
 	mem := req.MemoryMB
 	if mem <= 0 {
 		mem = s.cfg.Defaults.MemoryMB

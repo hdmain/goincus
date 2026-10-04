@@ -75,10 +75,10 @@ type PortsConfig struct {
 }
 
 type DefaultsConfig struct {
-	CPUCores  int `yaml:"cpu_cores"`
-	MemoryMB  int `yaml:"memory_mb"`
-	StorageGB int `yaml:"storage_gb"`
-	Processes int `yaml:"processes"`
+	CPUCores  float64 `yaml:"cpu_cores"` // may be fractional (0.5)
+	MemoryMB  int     `yaml:"memory_mb"`
+	StorageGB int     `yaml:"storage_gb"`
+	Processes int     `yaml:"processes"`
 }
 
 // Addr returns the HTTP listen address.
@@ -234,8 +234,8 @@ func (c *Config) Validate() error {
 	if c.Ports.PortsPerInstance > (c.Ports.HostRangeEnd - c.Ports.HostRangeStart + 1) {
 		return fmt.Errorf("ports_per_instance %d exceeds host port range", c.Ports.PortsPerInstance)
 	}
-	if c.Defaults.CPUCores < 1 {
-		return fmt.Errorf("defaults.cpu_cores must be >= 1")
+	if c.Defaults.CPUCores < 0.1 {
+		return fmt.Errorf("defaults.cpu_cores must be >= 0.1")
 	}
 	if c.Defaults.MemoryMB < 64 {
 		return fmt.Errorf("defaults.memory_mb must be >= 64")

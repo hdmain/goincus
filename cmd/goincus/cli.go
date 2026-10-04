@@ -80,8 +80,8 @@ func runList(args []string) int {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSTATUS\tCPU\tMEM\tDISK\tPORTS\tID")
 	for _, inst := range list {
-		fmt.Fprintf(w, "%s\t%s\t%d\t%dMB\t%dGB\t%s\t%s\n",
-			inst.Name, inst.Status, inst.CPUCores, inst.MemoryMB, inst.StorageGB,
+		fmt.Fprintf(w, "%s\t%s\t%s\t%dMB\t%dGB\t%s\t%s\n",
+			inst.Name, inst.Status, formatCPU(inst.CPUCores), inst.MemoryMB, inst.StorageGB,
 			apicli.PortRange(&inst), shortID(inst.ID.String()))
 	}
 	_ = w.Flush()
@@ -118,7 +118,7 @@ func runCreate(args []string) int {
 	// Support both: create NAME [flags] and create [flags] NAME
 	name, flagArgs := splitNameAndFlags(args)
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
-	cpu := fs.Int("cpu", 0, "CPU cores (0 = server default)")
+	cpu := fs.Float64("cpu", 0, "CPU cores, supports fractions e.g. 0.5 (0 = server default)")
 	mem := fs.Int("memory", 0, "memory MiB (0 = server default)")
 	disk := fs.Int("disk", 0, "disk GiB (0 = server default)")
 	image := fs.String("image", "", "image alias (default from server config)")
@@ -129,7 +129,7 @@ func runCreate(args []string) int {
 		name = rest[0]
 	}
 	if name == "" {
-		fmt.Fprintln(os.Stderr, "usage: goincus create <name> [-cpu N] [-memory MiB] [-disk GiB] [-image ALIAS] [-wait=false]")
+		fmt.Fprintln(os.Stderr, "usage: goincus create <name> [-cpu 0.5|1|2] [-memory MiB] [-disk GiB] [-image ALIAS] [-wait=false]")
 		return 2
 	}
 	cli, err := newAPIClient(f)
@@ -303,7 +303,7 @@ func printInstance(inst *models.Instance) {
 	fmt.Printf("incus:      %s\n", inst.IncusName)
 	fmt.Printf("status:     %s\n", inst.Status)
 	fmt.Printf("image:      %s\n", inst.Image)
-	fmt.Printf("resources:  %d CPU / %d MiB / %d GiB\n", inst.CPUCores, inst.MemoryMB, inst.StorageGB)
+	fmt.Printf("resources:  %s CPU / %d MiB / %d GiB\n", formatCPU(inst.CPUCores), inst.MemoryMB, inst.StorageGB)
 	fmt.Printf("ports:      %s (%d mapped)\n", apicli.PortRange(inst), len(inst.Ports))
 	if p := apicli.SSHPort(inst); p > 0 {
 		fmt.Printf("ssh_port:   %d\n", p)
@@ -335,6 +335,13 @@ func shortID(id string) string {
 		return id[:8]
 	}
 	return id
+}
+
+func formatCPU(v float64) string {
+	if v == float64(int(v)) {
+		return fmt.Sprintf("%g", v)
+	}
+	return fmt.Sprintf("%.2g", v)
 }
 
 // splitNameAndFlags pulls a leading positional name so flags may follow it.

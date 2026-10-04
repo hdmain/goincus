@@ -3,6 +3,7 @@ package incusclient
 import (
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -159,7 +160,7 @@ func (c *Client) EnsureNetwork() (string, error) {
 type CreateArgs struct {
 	Name         string
 	Image        string
-	CPUCores     int
+	CPUCores     float64
 	MemoryMB     int
 	StorageGB    int
 	Processes    int
@@ -250,12 +251,13 @@ func (c *Client) filterAvailableProfiles(profiles []string) []string {
 
 // ResourceConfig builds Incus instance config keys for CPU, memory, and process limits.
 //
-// limits.cpu as an integer makes Incus pin the container to that many host CPUs
-// (cpuset). Do not set limits.cpu.allowance=100% alongside it — that is only a
-// soft scheduler weight and confuses operators who expect a hard 1-CPU VPS.
-func ResourceConfig(cpuCores, memoryMB, processes int) map[string]string {
-	if cpuCores < 1 {
-		cpuCores = 1
+// Whole cores (1, 2, …): pin via limits.cpu cpuset.
+// Fractional (0.5, 1.5, …): pin ceil(cpu) CPUs and apply a hard CFS quota via
+// limits.cpu.allowance (e.g. 0.5 → 50ms/100ms). Do not use percentage allowance —
+// that is only a soft scheduler weight.
+func ResourceConfig(cpuCores float64, memoryMB, processes int) map[string]string {
+	if cpuCores < 0.1 {
+		cpuCores = 0.1
 	}
 	if memoryMB < 64 {
 		memoryMB = 64
@@ -263,12 +265,25 @@ func ResourceConfig(cpuCores, memoryMB, processes int) map[string]string {
 	if processes < 64 {
 		processes = 64
 	}
-	return map[string]string{
-		"limits.cpu":         strconv.Itoa(cpuCores),
+	pin := int(math.Ceil(cpuCores - 1e-9))
+	if pin < 1 {
+		pin = 1
+	}
+	cfg := map[string]string{
+		"limits.cpu":         strconv.Itoa(pin),
 		"limits.memory":      fmt.Sprintf("%dMiB", memoryMB),
 		"limits.memory.swap": "false",
 		"limits.processes":   strconv.Itoa(processes),
 	}
+	milli := int(math.Round(cpuCores * 100))
+	if milli < 10 {
+		milli = 10
+	}
+	// Fractional or non-integer: hard CFS quota relative to 1 CPU.
+	if milli%100 != 0 {
+		cfg["limits.cpu.allowance"] = fmt.Sprintf("%dms/100ms", milli)
+	}
+	return cfg
 }
 
 // StartContainer starts a container.
@@ -532,7 +547,7 @@ func (c *Client) RemoveProxyDevice(instanceName, deviceName string) error {
 }
 
 // UpdateResourceLimits adjusts CPU/memory/process limits on a running definition.
-func (c *Client) UpdateResourceLimits(name string, cpuCores, memoryMB, processes int) error {
+func (c *Client) UpdateResourceLimits(name string, cpuCores float64, memoryMB, processes int) error {
 	inst, etag, err := c.server.GetInstance(name)
 	if err != nil {
 		return err
@@ -540,11 +555,13 @@ func (c *Client) UpdateResourceLimits(name string, cpuCores, memoryMB, processes
 	if inst.Config == nil {
 		inst.Config = map[string]string{}
 	}
-	for k, v := range ResourceConfig(cpuCores, memoryMB, processes) {
+	cfg := ResourceConfig(cpuCores, memoryMB, processes)
+	for k, v := range cfg {
 		inst.Config[k] = v
 	}
-	// Drop legacy soft-weight key so cpuset from limits.cpu is the sole CPU control.
-	delete(inst.Config, "limits.cpu.allowance")
+	if _, ok := cfg["limits.cpu.allowance"]; !ok {
+		delete(inst.Config, "limits.cpu.allowance")
+	}
 	inst.Config["raw.lxc"] = MergeDiskIsolationRawLXC(inst.Config["raw.lxc"])
 	op, err := c.server.UpdateInstance(name, inst.Writable(), etag)
 	if err != nil {

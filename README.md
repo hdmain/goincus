@@ -124,6 +124,7 @@ On the host (API key is read from `/etc/goincus/config.yaml` by default):
 goincus health
 goincus list
 goincus create web-1 -cpu 1 -memory 512 -disk 10
+goincus create tiny -cpu 0.5 -memory 256 -disk 5   # half CPU via hard CFS quota
 goincus get web-1
 goincus ssh web-1 -host YOUR.PUBLIC.IP
 goincus stop web-1

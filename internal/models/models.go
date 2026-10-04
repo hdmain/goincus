@@ -26,7 +26,9 @@ type Instance struct {
 	IncusName    string         `json:"incus_name"`
 	Image        string         `json:"image"`
 	Status       InstanceStatus `json:"status"`
-	CPUCores     int            `json:"cpu_cores"`
+	// CPUCores may be fractional (e.g. 0.5). Whole cores pin via cpuset;
+	// fractions use a hard CFS quota (limits.cpu.allowance).
+	CPUCores     float64        `json:"cpu_cores"`
 	MemoryMB     int            `json:"memory_mb"`
 	StorageGB    int            `json:"storage_gb"`
 	Processes    int            `json:"processes"`
@@ -50,12 +52,12 @@ type PortMapping struct {
 
 // CreateInstanceRequest is the body for provisioning a new NAT VPS.
 type CreateInstanceRequest struct {
-	Name      string `json:"name"`
-	Image     string `json:"image,omitempty"`
-	CPUCores  int    `json:"cpu_cores,omitempty"`
-	MemoryMB  int    `json:"memory_mb,omitempty"`
-	StorageGB int    `json:"storage_gb,omitempty"`
-	Processes int    `json:"processes,omitempty"`
+	Name      string  `json:"name"`
+	Image     string  `json:"image,omitempty"`
+	CPUCores  float64 `json:"cpu_cores,omitempty"` // supports fractions, e.g. 0.5
+	MemoryMB  int     `json:"memory_mb,omitempty"`
+	StorageGB int     `json:"storage_gb,omitempty"`
+	Processes int     `json:"processes,omitempty"`
 	// InternalPorts is deprecated and ignored. Each VPS gets ports_per_instance
 	// contiguous ports mapped 1:1 (host:N → guest:N); sshd listens on the first.
 	InternalPorts []int `json:"internal_ports,omitempty"`

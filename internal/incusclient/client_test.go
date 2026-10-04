@@ -18,7 +18,27 @@ func TestResourceConfig(t *testing.T) {
 		}
 	}
 	if _, ok := cfg["limits.cpu.allowance"]; ok {
-		t.Fatal("limits.cpu.allowance must not be set (soft weight confuses 1-CPU VPSes)")
+		t.Fatal("whole cores must not set limits.cpu.allowance")
+	}
+}
+
+func TestResourceConfigHalfCPU(t *testing.T) {
+	cfg := ResourceConfig(0.5, 256, 256)
+	if cfg["limits.cpu"] != "1" {
+		t.Fatalf("pin = %q, want 1", cfg["limits.cpu"])
+	}
+	if cfg["limits.cpu.allowance"] != "50ms/100ms" {
+		t.Fatalf("allowance = %q, want 50ms/100ms", cfg["limits.cpu.allowance"])
+	}
+}
+
+func TestResourceConfigOneAndHalf(t *testing.T) {
+	cfg := ResourceConfig(1.5, 512, 256)
+	if cfg["limits.cpu"] != "2" {
+		t.Fatalf("pin = %q, want 2", cfg["limits.cpu"])
+	}
+	if cfg["limits.cpu.allowance"] != "150ms/100ms" {
+		t.Fatalf("allowance = %q, want 150ms/100ms", cfg["limits.cpu.allowance"])
 	}
 }
 
@@ -71,4 +91,3 @@ func TestIsDFIsolatingDriver(t *testing.T) {
 		t.Fatal("dir/btrfs must not count as df-isolating")
 	}
 }
-
