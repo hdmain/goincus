@@ -113,6 +113,30 @@ sudo ufw allow 9603/tcp
 sudo ufw allow 20000:29999/tcp
 ```
 
+## CLI
+
+On the host (API key is read from `/etc/goincus/config.yaml` by default):
+
+```bash
+goincus health
+goincus list
+goincus create web-1 -cpu 1 -memory 512 -disk 10
+goincus get web-1
+goincus ssh web-1 -host 5.83.150.237
+goincus stop web-1
+goincus start web-1
+goincus restart web-1
+goincus repair web-1
+goincus delete web-1 -y
+```
+
+Remote API:
+
+```bash
+goincus list -url http://HOST:9603 -key gic_xxx
+# or: export GOINCUS_URL=... GOINCUS_API_KEY=...
+```
+
 ## Examples
 
 Python scripts in [`example/`](example/) (stdlib only):

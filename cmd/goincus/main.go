@@ -35,6 +35,26 @@ func main() {
 		os.Exit(runInit(os.Args[2:]))
 	case "serve", "run":
 		os.Exit(runServe(os.Args[2:]))
+	case "health":
+		os.Exit(runHealth(os.Args[2:]))
+	case "list", "ls":
+		os.Exit(runList(os.Args[2:]))
+	case "get", "show":
+		os.Exit(runGet(os.Args[2:]))
+	case "create":
+		os.Exit(runCreate(os.Args[2:]))
+	case "delete", "rm":
+		os.Exit(runDelete(os.Args[2:]))
+	case "start":
+		os.Exit(runStart(os.Args[2:]))
+	case "stop":
+		os.Exit(runStop(os.Args[2:]))
+	case "restart":
+		os.Exit(runRestart(os.Args[2:]))
+	case "repair":
+		os.Exit(runRepair(os.Args[2:]))
+	case "ssh":
+		os.Exit(runSSHInfo(os.Args[2:]))
 	case "version", "-version", "--version":
 		fmt.Println(version)
 	case "help", "-h", "--help":
@@ -47,17 +67,29 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `goincus — Incus NAT VPS provisioning API
+	fmt.Fprintf(os.Stderr, `goincus — Incus NAT VPS provisioning API + CLI
 
 Usage:
   goincus init [--force] [--skip-install] [--config PATH]
   goincus serve [-config PATH] [-migrations DIR]
+  goincus health|list|get|create|delete|start|stop|restart|repair|ssh ...
   goincus version
 
-Commands:
-  init    Install PostgreSQL, Redis, and Incus; generate config, passwords, and API keys
-  serve   Start the HTTP API (0.0.0.0:9603)
-  version Print version
+Server:
+  init      Install PostgreSQL, Redis, and Incus; generate config + API keys
+  serve     Start the HTTP API (0.0.0.0:9603)
+
+CLI (talks to API; key from -key, GOINCUS_API_KEY, or /etc/goincus/config.yaml):
+  health                 Check API / DB / Redis / Incus
+  list, ls               List instances
+  get, show <name|id>    Show instance (incl. password + ports)
+  create <name>          Create NAT VPS (-cpu -memory -disk -image -wait)
+  delete, rm <name|id>   Delete instance (-y to skip confirm)
+  start|stop|restart|repair <name|id>
+  ssh <name|id>          Print ssh command + password (-host IP)
+
+Common flags: -url -key -config -json
+Env: GOINCUS_URL GOINCUS_API_KEY GOINCUS_CONFIG GOINCUS_SSH_HOST
 
 `)
 }
