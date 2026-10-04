@@ -401,6 +401,52 @@ func (c *Client) AddProxyDevice(instanceName, deviceName, protocol string, hostP
 	return c.addForkProxyDevice(instanceName, deviceName, protocol, hostPort, internalPort, nil)
 }
 
+// ProxySpec describes one host↔guest 1:1 (or N:M) TCP/UDP proxy mapping.
+type ProxySpec struct {
+	DeviceName   string
+	Protocol     string
+	HostPort     int
+	InternalPort int
+}
+
+// AddProxyDevices attaches many proxy devices in a single Incus instance update.
+func (c *Client) AddProxyDevices(instanceName string, specs []ProxySpec) error {
+	if len(specs) == 0 {
+		return nil
+	}
+	inst, etag, err := c.server.GetInstance(instanceName)
+	if err != nil {
+		return fmt.Errorf("add proxy devices: %w", err)
+	}
+	if inst.Devices == nil {
+		inst.Devices = map[string]map[string]string{}
+	}
+	for _, spec := range specs {
+		proto := spec.Protocol
+		if proto == "" {
+			proto = "tcp"
+		}
+		name := spec.DeviceName
+		if name == "" {
+			name = fmt.Sprintf("proxy-%d", spec.HostPort)
+		}
+		inst.Devices[name] = map[string]string{
+			"type":    "proxy",
+			"listen":  fmt.Sprintf("%s:0.0.0.0:%d", proto, spec.HostPort),
+			"connect": fmt.Sprintf("%s:127.0.0.1:%d", proto, spec.InternalPort),
+			"bind":    "host",
+		}
+	}
+	op, err := c.server.UpdateInstance(instanceName, inst.Writable(), etag)
+	if err != nil {
+		return fmt.Errorf("add proxy devices: %w", err)
+	}
+	if err := op.Wait(); err != nil {
+		return fmt.Errorf("add proxy devices: %w", err)
+	}
+	return nil
+}
+
 func staticIPv4FromDevices(devices map[string]map[string]string) string {
 	for _, dev := range devices {
 		if dev["type"] != "nic" {

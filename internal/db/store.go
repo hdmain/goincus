@@ -289,9 +289,13 @@ func (s *Store) DeletePort(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-// ListUsedHostPorts returns all allocated host ports from the database.
+// ListUsedHostPorts returns host ports still held by non-deleted instances.
 func (s *Store) ListUsedHostPorts(ctx context.Context) ([]int, error) {
-	rows, err := s.pool.Query(ctx, `SELECT host_port FROM port_mappings`)
+	rows, err := s.pool.Query(ctx, `
+		SELECT pm.host_port
+		FROM port_mappings pm
+		INNER JOIN instances i ON i.id = pm.instance_id
+		WHERE i.status <> 'deleted'`)
 	if err != nil {
 		return nil, err
 	}

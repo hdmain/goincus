@@ -276,26 +276,39 @@ func (s *Service) attachPortBlock(ctx context.Context, inst *models.Instance, bl
 		have[p.HostPort] = struct{}{}
 	}
 
+	specs := make([]incusclient.ProxySpec, 0, len(block))
+	pending := make([]models.PortMapping, 0, len(block))
+	now := time.Now().UTC()
 	for _, port := range block {
 		if _, ok := have[port]; ok {
 			continue
 		}
 		device := fmt.Sprintf("proxy-%d", port)
-		if err := s.incus.AddProxyDevice(inst.IncusName, device, "tcp", port, port); err != nil {
-			return fmt.Errorf("proxy device %s: %w", device, err)
-		}
-		pm := models.PortMapping{
+		specs = append(specs, incusclient.ProxySpec{
+			DeviceName:   device,
+			Protocol:     "tcp",
+			HostPort:     port,
+			InternalPort: port,
+		})
+		pending = append(pending, models.PortMapping{
 			ID:           uuid.New(),
 			InstanceID:   inst.ID,
 			Protocol:     "tcp",
 			HostPort:     port,
 			InternalPort: port,
 			DeviceName:   device,
-			CreatedAt:    time.Now().UTC(),
-		}
-		if err := s.store.AddPort(ctx, &pm); err != nil {
-			_ = s.incus.RemoveProxyDevice(inst.IncusName, device)
-			return fmt.Errorf("persist port: %w", err)
+			CreatedAt:    now,
+		})
+	}
+	if len(specs) == 0 {
+		return nil
+	}
+	if err := s.incus.AddProxyDevices(inst.IncusName, specs); err != nil {
+		return fmt.Errorf("proxy devices: %w", err)
+	}
+	for i := range pending {
+		if err := s.store.AddPort(ctx, &pending[i]); err != nil {
+			return fmt.Errorf("persist port %d: %w", pending[i].HostPort, err)
 		}
 	}
 	return nil
@@ -429,6 +442,11 @@ func (s *Service) GetInstance(ctx context.Context, id uuid.UUID) (*models.Instan
 }
 
 func (s *Service) syncStatusFromIncus(ctx context.Context, inst *models.Instance) {
+	// Never promote mid-provision / teardown from Incus power state — ports/SSH may still be incomplete.
+	switch inst.Status {
+	case models.StatusPending, models.StatusCreating, models.StatusDeleting, models.StatusDeleted:
+		return
+	}
 	status, err := s.incus.GetStatus(inst.IncusName)
 	if err != nil {
 		return

@@ -19,18 +19,14 @@ Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
 
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
+# Control plane must manage Incus, host NAT/sysctl, and storage pools.
+# Keep filesystem confinement light; do not block module/sysctl writes.
 PrivateTmp=true
-ProtectKernelModules=true
-ProtectControlGroups=true
+ProtectHome=true
 LockPersonality=true
 RestrictSUIDSGID=true
 RestrictRealtime=true
-ReadWritePaths=/var/lib/incus /run/incus /var/log/goincus
-ReadOnlyPaths=/etc/goincus
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/incus /run/incus /var/log/goincus /etc/goincus /etc/sysctl.d /etc/modules-load.d /etc/subuid /etc/subgid /var/lib/goincus
 
 StandardOutput=journal
 StandardError=journal
