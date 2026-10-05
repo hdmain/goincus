@@ -108,12 +108,13 @@ or `X-API-Key: <api_key>`.
 - Guest sshd: MaxAuthTries, LoginGraceTime, no empty passwords, no X11
 - Host NAT/FORWARD persisted via `goincus-net.service` (Docker-safe)
 - Put TLS in front (nginx/caddy) if the API is reachable from the internet
-- Open host firewall for mapped VPS ports, e.g. `20000-29999/tcp`
+- Open host firewall for mapped VPS ports, e.g. `20000-29999/tcp` and `20000-29999/udp`
 
 ```bash
 sudo systemctl enable --now goincus-net goincus
 sudo ufw allow 9603/tcp
 sudo ufw allow 20000:29999/tcp
+sudo ufw allow 20000:29999/udp
 ```
 
 ## CLI

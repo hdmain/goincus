@@ -548,6 +548,51 @@ func (c *Client) RemoveProxyDevice(instanceName, deviceName string) error {
 	return op.Wait()
 }
 
+// UpdateProxyDeviceProtocol changes listen/connect protocol for an existing proxy device.
+// When newDeviceName differs from oldDeviceName the device is renamed.
+func (c *Client) UpdateProxyDeviceProtocol(instanceName, oldDeviceName, newDeviceName, protocol string, hostPort, internalPort int) error {
+	proto := strings.ToLower(strings.TrimSpace(protocol))
+	if proto == "" {
+		proto = "tcp"
+	}
+	inst, etag, err := c.server.GetInstance(instanceName)
+	if err != nil {
+		return fmt.Errorf("update proxy protocol: %w", err)
+	}
+	if inst.Devices == nil {
+		inst.Devices = map[string]map[string]string{}
+	}
+	dev, ok := inst.Devices[oldDeviceName]
+	if !ok {
+		return fmt.Errorf("proxy device %q not found", oldDeviceName)
+	}
+	cfg := map[string]string{
+		"type":    "proxy",
+		"listen":  fmt.Sprintf("%s:0.0.0.0:%d", proto, hostPort),
+		"connect": fmt.Sprintf("%s:127.0.0.1:%d", proto, internalPort),
+		"bind":    "host",
+	}
+	// Preserve non-listen/connect keys (e.g. nat, proxy_protocol) if any.
+	for k, v := range dev {
+		if k == "type" || k == "listen" || k == "connect" || k == "bind" {
+			continue
+		}
+		cfg[k] = v
+	}
+	if newDeviceName == "" {
+		newDeviceName = oldDeviceName
+	}
+	if newDeviceName != oldDeviceName {
+		delete(inst.Devices, oldDeviceName)
+	}
+	inst.Devices[newDeviceName] = cfg
+	op, err := c.server.UpdateInstance(instanceName, inst.Writable(), etag)
+	if err != nil {
+		return fmt.Errorf("update proxy protocol: %w", err)
+	}
+	return op.Wait()
+}
+
 // UpdateResourceLimits adjusts CPU/memory/process and NIC bandwidth limits.
 // When trafficThrottled is true, eth0 is capped to OverQuotaThrottleLimit instead of bandwidthMbps.
 func (c *Client) UpdateResourceLimits(name string, cpuCores float64, memoryMB, processes, bandwidthMbps int, trafficThrottled bool) error {
@@ -687,12 +732,12 @@ func (c *Client) DiskUsageBytes(name string) (used, total int64, err error) {
 
 // ResourceSample is a point-in-time reading of guest resource counters.
 type ResourceSample struct {
-	CPUUsageNS      int64
-	MemoryUsedBytes int64
+	CPUUsageNS       int64
+	MemoryUsedBytes  int64
 	MemoryTotalBytes int64
-	DiskUsedBytes   int64
-	DiskTotalBytes  int64
-	NetBytesTotal   int64
+	DiskUsedBytes    int64
+	DiskTotalBytes   int64
+	NetBytesTotal    int64
 }
 
 // ResourceSample reads CPU/memory/disk/network counters from instance state in one call.

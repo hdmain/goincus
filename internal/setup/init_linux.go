@@ -592,10 +592,12 @@ $IPT -C INPUT -i "$BR" -j GOINCUS-BRIDGE-IN 2>/dev/null \
   || $IPT -I INPUT 1 -i "$BR" -j GOINCUS-BRIDGE-IN
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi 'Status: active'; then
   ufw allow "${PORT_START}:${PORT_END}/tcp" comment 'goincus NAT VPS ports' >/dev/null 2>&1 || true
+  ufw allow "${PORT_START}:${PORT_END}/udp" comment 'goincus NAT VPS ports udp' >/dev/null 2>&1 || true
   ufw allow "${API_PORT}/tcp" comment 'goincus API' >/dev/null 2>&1 || true
 fi
 if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -qi running; then
   firewall-cmd --permanent --add-port="${PORT_START}-${PORT_END}/tcp" >/dev/null 2>&1 || true
+  firewall-cmd --permanent --add-port="${PORT_START}-${PORT_END}/udp" >/dev/null 2>&1 || true
   firewall-cmd --permanent --add-port="${API_PORT}/tcp" >/dev/null 2>&1 || true
   firewall-cmd --reload >/dev/null 2>&1 || true
 fi

@@ -43,6 +43,7 @@ ENDPOINTS (summary)
   POST   /api/v1/instances/{id|name}/restart
   POST   /api/v1/instances/{id|name}/repair
   POST   /api/v1/instances/{id|name}/ports
+  PATCH  /api/v1/instances/{id|name}/ports/{portID}
   DELETE /api/v1/instances/{id|name}/ports/{portID}
 
 {id|name} accepts UUID or instance name.
@@ -439,6 +440,31 @@ Response: PortMapping.
 
 
 ------------------------------------------------------------------------------
+8b) UPDATE PORT PROTOCOL
+------------------------------------------------------------------------------
+
+PATCH /api/v1/instances/{id|name}/ports/{portID}
+
+Auth: required
+Status: 200
+
+Change an existing mapping between TCP and UDP. Host and guest ports stay
+the same; the Incus proxy device is updated in place.
+
+Body:
+  {
+    "protocol": "udp"
+  }
+
+Notes:
+  - Default block ports are created as TCP; use this to switch one to UDP.
+  - First port of the block is used for SSH (TCP) — do not switch that one
+    to UDP if you still need SSH on it.
+  - Host firewall must allow the range for UDP as well
+    (ufw/firewalld: 20000-29999/udp).
+
+
+------------------------------------------------------------------------------
 9) REMOVE PORT
 ------------------------------------------------------------------------------
 
@@ -558,6 +584,12 @@ curl -s -X POST http://127.0.0.1:9603/api/v1/instances/web-1/stop \
 curl -s -X POST http://127.0.0.1:9603/api/v1/instances/web-1/start \
   -H "Authorization: Bearer gic_xxx"
 
+# Change a port mapping to UDP (portID from GET instance ports[])
+curl -s -X PATCH http://127.0.0.1:9603/api/v1/instances/web-1/ports/PORT_UUID \
+  -H "Authorization: Bearer gic_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"protocol":"udp"}'
+
 # Delete
 curl -s -o /dev/null -w "%{http_code}\n" -X DELETE \
   http://127.0.0.1:9603/api/v1/instances/web-1 \
@@ -601,5 +633,6 @@ Open API (if remote) and the VPS port range, e.g.:
 
   ufw allow 9603/tcp
   ufw allow 20000:29999/tcp
+  ufw allow 20000:29999/udp
 
 Prefer TLS reverse proxy in front of the API on the public internet.

@@ -58,6 +58,7 @@ func (s *Server) Router() http.Handler {
 				r.Post("/restart", s.handleRestartInstance)
 				r.Post("/repair", s.handleRepairInstance)
 				r.Post("/ports", s.handleAddPort)
+				r.Patch("/ports/{portID}", s.handleUpdatePort)
 				r.Delete("/ports/{portID}", s.handleRemovePort)
 			})
 		})
@@ -273,6 +274,30 @@ func (s *Server) handleAddPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, pm)
+}
+
+func (s *Server) handleUpdatePort(w http.ResponseWriter, r *http.Request) {
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	portID, err := uuid.Parse(chi.URLParam(r, "portID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("invalid port id"))
+		return
+	}
+	var req models.UpdatePortRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("invalid JSON body"))
+		return
+	}
+	pm, err := s.svc.UpdatePortMapping(r.Context(), inst.ID, portID, req)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pm)
 }
 
 func (s *Server) handleRemovePort(w http.ResponseWriter, r *http.Request) {

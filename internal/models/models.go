@@ -87,6 +87,12 @@ type AddPortRequest struct {
 	HostPort int `json:"host_port,omitempty"`
 }
 
+// UpdatePortRequest changes an existing port mapping (currently protocol only).
+type UpdatePortRequest struct {
+	// Protocol is "tcp" or "udp". Same host/internal ports are kept.
+	Protocol string `json:"protocol"`
+}
+
 // ErrorResponse is a standard JSON error payload.
 type ErrorResponse struct {
 	Error   string `json:"error"`
@@ -209,6 +215,6 @@ type ResourceBandwidth struct {
 	MonthlyLimitGB   int    `json:"monthly_limit_gb"` // 0 = unlimited
 	MonthlyUsedBytes int64  `json:"monthly_used_bytes"`
 	Period           string `json:"period"` // UTC YYYY-MM
-	Throttled  bool  `json:"throttled"`
-	TotalBytes int64 `json:"total_bytes"` // cumulative eth0 rx+tx from Incus
+	Throttled        bool   `json:"throttled"`
+	TotalBytes       int64  `json:"total_bytes"` // cumulative eth0 rx+tx from Incus
 }

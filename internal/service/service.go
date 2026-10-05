@@ -157,11 +157,11 @@ func (s *Service) CreateInstance(ctx context.Context, req models.CreateInstanceR
 	}
 
 	inst := &models.Instance{
-		ID:           id,
-		Name:         name,
-		IncusName:    incusName,
-		Image:        image,
-		Status:       models.StatusPending,
+		ID:               id,
+		Name:             name,
+		IncusName:        incusName,
+		Image:            image,
+		Status:           models.StatusPending,
 		CPUCores:         cpu,
 		MemoryMB:         mem,
 		StorageGB:        storage,
@@ -674,4 +674,59 @@ func (s *Service) RemovePortMapping(ctx context.Context, instanceID, portID uuid
 	_ = s.incus.RemoveProxyDevice(inst.IncusName, pm.DeviceName)
 	_ = s.ports.Release(ctx, pm.HostPort)
 	return s.store.DeletePort(ctx, pm.ID)
+}
+
+// UpdatePortMapping changes an existing mapping's protocol (tcp ↔ udp).
+// Host and internal ports stay the same; the Incus proxy device is updated in place.
+func (s *Service) UpdatePortMapping(ctx context.Context, instanceID, portID uuid.UUID, req models.UpdatePortRequest) (*models.PortMapping, error) {
+	inst, err := s.GetInstance(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	pm, err := s.store.GetPort(ctx, instanceID, portID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	proto := strings.ToLower(strings.TrimSpace(req.Protocol))
+	if proto != "tcp" && proto != "udp" {
+		return nil, fmt.Errorf("%w: protocol must be tcp or udp", ErrInvalidInput)
+	}
+	if proto == pm.Protocol {
+		return pm, nil
+	}
+
+	// UNIQUE(host_port, protocol): refuse if the other protocol already occupies this host port.
+	for _, existing := range inst.Ports {
+		if existing.ID != pm.ID && existing.HostPort == pm.HostPort && existing.Protocol == proto {
+			return nil, fmt.Errorf("%w: host port %d already mapped as %s", ErrConflict, pm.HostPort, proto)
+		}
+	}
+
+	newDevice := fmt.Sprintf("proxy-%s-%d", proto, pm.HostPort)
+	for _, existing := range inst.Ports {
+		if existing.ID != pm.ID && existing.DeviceName == newDevice {
+			newDevice = fmt.Sprintf("proxy-%s-%d-%s", proto, pm.HostPort, uuid.New().String()[:8])
+			break
+		}
+	}
+
+	if err := s.incus.UpdateProxyDeviceProtocol(
+		inst.IncusName, pm.DeviceName, newDevice, proto, pm.HostPort, pm.InternalPort,
+	); err != nil {
+		return nil, fmt.Errorf("update proxy protocol: %w", err)
+	}
+	if err := s.store.UpdatePortProtocol(ctx, pm.ID, proto, newDevice); err != nil {
+		// Best-effort rollback to previous protocol/device.
+		_ = s.incus.UpdateProxyDeviceProtocol(
+			inst.IncusName, newDevice, pm.DeviceName, pm.Protocol, pm.HostPort, pm.InternalPort,
+		)
+		return nil, err
+	}
+	pm.Protocol = proto
+	pm.DeviceName = newDevice
+	return pm, nil
 }

@@ -298,6 +298,15 @@ func (s *Store) DeletePort(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+// UpdatePortProtocol updates protocol (and optionally device_name) for a mapping.
+func (s *Store) UpdatePortProtocol(ctx context.Context, id uuid.UUID, protocol, deviceName string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE port_mappings
+		SET protocol = $2, device_name = $3
+		WHERE id = $1`, id, protocol, deviceName)
+	return err
+}
+
 // ListUsedHostPorts returns host ports still held by non-deleted instances.
 func (s *Store) ListUsedHostPorts(ctx context.Context) ([]int, error) {
 	rows, err := s.pool.Query(ctx, `

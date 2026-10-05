@@ -212,6 +212,16 @@ func (c *Client) RepairInstance(ctx context.Context, idOrName string) (*models.I
 	return c.action(ctx, idOrName, "repair")
 }
 
+// UpdatePort PATCH /api/v1/instances/{id}/ports/{portID}
+func (c *Client) UpdatePort(ctx context.Context, idOrName, portID string, req models.UpdatePortRequest) (*models.PortMapping, error) {
+	var out models.PortMapping
+	path := "/api/v1/instances/" + url.PathEscape(idOrName) + "/ports/" + url.PathEscape(portID)
+	if err := c.do(ctx, http.MethodPatch, path, req, &out, true); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) action(ctx context.Context, idOrName, action string) (*models.Instance, error) {
 	var out models.Instance
 	path := fmt.Sprintf("/api/v1/instances/%s/%s", url.PathEscape(idOrName), action)
