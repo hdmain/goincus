@@ -212,6 +212,16 @@ func (c *Client) RepairInstance(ctx context.Context, idOrName string) (*models.I
 	return c.action(ctx, idOrName, "repair")
 }
 
+// ResetPassword POST /api/v1/instances/{id}/reset-password
+func (c *Client) ResetPassword(ctx context.Context, idOrName string, req models.ResetPasswordRequest) (*models.Instance, error) {
+	var out models.Instance
+	path := "/api/v1/instances/" + url.PathEscape(idOrName) + "/reset-password"
+	if err := c.do(ctx, http.MethodPost, path, req, &out, true); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // UpdatePort PATCH /api/v1/instances/{id}/ports/{portID}
 func (c *Client) UpdatePort(ctx context.Context, idOrName, portID string, req models.UpdatePortRequest) (*models.PortMapping, error) {
 	var out models.PortMapping

@@ -212,6 +212,34 @@ func runStop(args []string) int    { return runAction("stop", args) }
 func runRestart(args []string) int { return runAction("restart", args) }
 func runRepair(args []string) int  { return runAction("repair", args) }
 
+func runResetPassword(args []string) int {
+	name, flagArgs := splitNameAndFlags(args)
+	fs := flag.NewFlagSet("reset-password", flag.ExitOnError)
+	password := fs.String("password", "", "set this password instead of generating one")
+	f, rest := parseCLIFlags(fs, flagArgs)
+	if name == "" && len(rest) > 0 {
+		name = rest[0]
+	}
+	if name == "" {
+		fmt.Fprintln(os.Stderr, "usage: goincus reset-password <name-or-id> [-password SECRET]")
+		return 2
+	}
+	cli, err := newAPIClient(f)
+	if err != nil {
+		return cliErr(err)
+	}
+	out, err := cli.ResetPassword(context.Background(), name, models.ResetPasswordRequest{Password: *password})
+	if err != nil {
+		return cliErr(err)
+	}
+	if f.jsonOut {
+		return printJSON(out)
+	}
+	fmt.Printf("instance: %s (%s)\n", out.Name, out.ID)
+	fmt.Printf("root_password: %s\n", out.RootPassword)
+	return 0
+}
+
 func runAction(action string, args []string) int {
 	name, flagArgs := splitNameAndFlags(args)
 	fs := flag.NewFlagSet(action, flag.ExitOnError)

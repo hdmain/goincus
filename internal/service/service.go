@@ -539,6 +539,49 @@ func (s *Service) RepairInstance(ctx context.Context, id uuid.UUID) (*models.Ins
 	return s.StartInstance(ctx, id)
 }
 
+// ResetRootPassword generates (or applies) a new root password inside the guest and DB.
+func (s *Service) ResetRootPassword(ctx context.Context, id uuid.UUID, req models.ResetPasswordRequest) (*models.Instance, error) {
+	inst, err := s.GetInstance(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if inst.Status == models.StatusDeleted || inst.Status == models.StatusDeleting {
+		return nil, fmt.Errorf("%w: instance is deleted", ErrInvalidInput)
+	}
+
+	pass := strings.TrimSpace(req.Password)
+	if pass == "" {
+		generated, err := secrets.RandomPassword(18)
+		if err != nil {
+			return nil, fmt.Errorf("generate root password: %w", err)
+		}
+		pass = generated
+	}
+	if len(pass) < 8 {
+		return nil, fmt.Errorf("%w: password must be at least 8 characters", ErrInvalidInput)
+	}
+
+	// Guest must be running for chpasswd via exec.
+	if err := s.incus.EnsureStarted(inst.IncusName); err != nil {
+		return nil, fmt.Errorf("start for password reset: %w", err)
+	}
+	if err := s.incus.SetRootPassword(inst.IncusName, pass); err != nil {
+		return nil, fmt.Errorf("set root password in guest: %w", err)
+	}
+	if err := s.store.UpdateRootPassword(ctx, inst.ID, pass); err != nil {
+		return nil, fmt.Errorf("persist root password: %w", err)
+	}
+	_ = s.store.UpdateInstanceStatus(ctx, id, models.StatusRunning, "")
+	_ = s.redis.SetInstanceState(ctx, id.String(), string(models.StatusRunning), 24*time.Hour)
+
+	out, err := s.GetInstance(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out.RootPassword = pass
+	return out, nil
+}
+
 // StopInstance stops a running container.
 func (s *Service) StopInstance(ctx context.Context, id uuid.UUID) (*models.Instance, error) {
 	inst, err := s.GetInstance(ctx, id)

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -57,6 +58,7 @@ func (s *Server) Router() http.Handler {
 				r.Post("/stop", s.handleStopInstance)
 				r.Post("/restart", s.handleRestartInstance)
 				r.Post("/repair", s.handleRepairInstance)
+				r.Post("/reset-password", s.handleResetPassword)
 				r.Post("/ports", s.handleAddPort)
 				r.Patch("/ports/{portID}", s.handleUpdatePort)
 				r.Delete("/ports/{portID}", s.handleRemovePort)
@@ -250,6 +252,25 @@ func (s *Server) handleRepairInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.svc.RepairInstance(r.Context(), inst.ID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleResetPassword(w http.ResponseWriter, r *http.Request) {
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	var req models.ResetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, errors.New("invalid JSON body"))
+		return
+	}
+	out, err := s.svc.ResetRootPassword(r.Context(), inst.ID, req)
 	if err != nil {
 		writeServiceError(w, err)
 		return

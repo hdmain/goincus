@@ -122,6 +122,27 @@ exit 1
 	return nil
 }
 
+// SetRootPassword changes the guest root password via chpasswd (no SSH reinstall).
+func (c *Client) SetRootPassword(name, rootPassword string) error {
+	if strings.TrimSpace(rootPassword) == "" {
+		return fmt.Errorf("root password is empty")
+	}
+	b64 := base64.StdEncoding.EncodeToString([]byte(rootPassword))
+	script := fmt.Sprintf(`set -eu
+PASS="$(echo '%s' | base64 -d)"
+echo "root:${PASS}" | chpasswd
+unset PASS
+`, b64)
+	stdout, stderr, code, err := c.exec(name, script)
+	if err != nil {
+		return fmt.Errorf("set root password: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("set root password exited %d: %s %s", code, stdout, stderr)
+	}
+	return nil
+}
+
 func (c *Client) installOpenSSHViaApt(name string) error {
 	stdout, stderr, code, err := c.exec(name, `
 set -eux

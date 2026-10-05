@@ -93,6 +93,12 @@ type UpdatePortRequest struct {
 	Protocol string `json:"protocol"`
 }
 
+// ResetPasswordRequest optionally sets a specific root password.
+// When password is empty, a new random password is generated.
+type ResetPasswordRequest struct {
+	Password string `json:"password,omitempty"`
+}
+
 // ErrorResponse is a standard JSON error payload.
 type ErrorResponse struct {
 	Error   string `json:"error"`

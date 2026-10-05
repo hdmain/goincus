@@ -53,6 +53,8 @@ func main() {
 		os.Exit(runRestart(os.Args[2:]))
 	case "repair":
 		os.Exit(runRepair(os.Args[2:]))
+	case "reset-password", "passwd":
+		os.Exit(runResetPassword(os.Args[2:]))
 	case "ssh":
 		os.Exit(runSSHInfo(os.Args[2:]))
 	case "usage":
@@ -80,7 +82,7 @@ func printUsage() {
 Usage:
   goincus init [--force] [--skip-install] [--config PATH]
   goincus serve [-config PATH] [-migrations DIR]
-  goincus health|list|get|create|delete|start|stop|restart|repair|ssh|usage|metrics|hoststats|resources ...
+  goincus health|list|get|create|delete|start|stop|restart|repair|reset-password|ssh|usage|metrics|hoststats|resources ...
   goincus version
 
 Server:
@@ -94,6 +96,7 @@ CLI (talks to API; key from -key, GOINCUS_API_KEY, or /etc/goincus/config.yaml):
   create <name>          Create NAT VPS (-cpu -memory -disk -image -wait)
   delete, rm <name|id>   Delete instance (-y to skip confirm)
   start|stop|restart|repair <name|id>
+  reset-password, passwd <name|id>  Generate new root password (-password to set)
   ssh <name|id>          Print ssh command + password (-host IP)
   usage <name|id>        Daily disk + bandwidth chart data (-days 30)
   metrics [name|id]      Hourly CPU/RAM/disk/bandwidth (-hours 24; omit name = all)

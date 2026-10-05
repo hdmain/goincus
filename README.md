@@ -134,6 +134,7 @@ goincus stop web-1
 goincus start web-1
 goincus restart web-1
 goincus repair web-1
+goincus reset-password web-1          # new random root password
 goincus usage web-1 -days 30          # daily disk + bandwidth for charts
 goincus metrics -hours 24             # hourly CPU/RAM/disk/bandwidth (all VPS)
 goincus metrics web-1 -hours 24

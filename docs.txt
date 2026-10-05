@@ -42,6 +42,7 @@ ENDPOINTS (summary)
   POST   /api/v1/instances/{id|name}/stop
   POST   /api/v1/instances/{id|name}/restart
   POST   /api/v1/instances/{id|name}/repair
+  POST   /api/v1/instances/{id|name}/reset-password
   POST   /api/v1/instances/{id|name}/ports
   PATCH  /api/v1/instances/{id|name}/ports/{portID}
   DELETE /api/v1/instances/{id|name}/ports/{portID}
@@ -417,6 +418,30 @@ repair
 
 
 ------------------------------------------------------------------------------
+7b) RESET ROOT PASSWORD
+------------------------------------------------------------------------------
+
+POST /api/v1/instances/{id|name}/reset-password
+
+Auth: required
+Status: 200
+
+Generates a new random root password (or applies an optional provided one),
+sets it inside the guest via chpasswd, and stores it in the DB.
+Starts the container if it was stopped.
+
+Body (optional):
+  {
+    "password": "MyNewSecretPass"
+  }
+
+When password is omitted or empty, a random 18-char password is generated.
+Minimum length when provided: 8.
+
+Response: Instance including the new root_password.
+
+
+------------------------------------------------------------------------------
 8) ADD PORT
 ------------------------------------------------------------------------------
 
@@ -526,6 +551,7 @@ CLI (talks to the same API)
   goincus get <name|id>
   goincus create <name> [-cpu] [-memory] [-disk] [-bandwidth] [-traffic] [-image] [-wait]
   goincus start|stop|restart|repair <name|id>
+  goincus reset-password <name|id> [-password SECRET] [-json]
   goincus usage <name|id> [-days 30] [-json]
   goincus metrics [name|id] [-hours 24] [-json]
   goincus resources <name|id> [-json]
@@ -589,6 +615,12 @@ curl -s -X PATCH http://127.0.0.1:9603/api/v1/instances/web-1/ports/PORT_UUID \
   -H "Authorization: Bearer gic_xxx" \
   -H "Content-Type: application/json" \
   -d '{"protocol":"udp"}'
+
+# Reset root password (omit body to generate a random one)
+curl -s -X POST http://127.0.0.1:9603/api/v1/instances/web-1/reset-password \
+  -H "Authorization: Bearer gic_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{}'
 
 # Delete
 curl -s -o /dev/null -w "%{http_code}\n" -X DELETE \
