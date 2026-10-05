@@ -49,6 +49,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/", s.handleCreateInstance)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Get("/", s.handleGetInstance)
+				r.Get("/resources", s.handleGetInstanceResources)
 				r.Get("/usage", s.handleGetInstanceUsage)
 				r.Get("/metrics", s.handleGetInstanceMetrics)
 				r.Delete("/", s.handleDeleteInstance)
@@ -106,6 +107,20 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, inst)
+}
+
+func (s *Server) handleGetInstanceResources(w http.ResponseWriter, r *http.Request) {
+	inst, err := s.svc.ResolveInstance(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	out, err := s.svc.GetInstanceResources(r.Context(), inst.ID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleGetInstanceUsage(w http.ResponseWriter, r *http.Request) {

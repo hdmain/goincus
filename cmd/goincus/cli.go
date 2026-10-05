@@ -287,6 +287,51 @@ func runMetrics(args []string) int {
 	return 0
 }
 
+func runResources(args []string) int {
+	name, flagArgs := splitNameAndFlags(args)
+	fs := flag.NewFlagSet("resources", flag.ExitOnError)
+	f, rest := parseCLIFlags(fs, flagArgs)
+	if name == "" && len(rest) > 0 {
+		name = rest[0]
+	}
+	if name == "" {
+		fmt.Fprintln(os.Stderr, "usage: goincus resources <name-or-id>")
+		return 2
+	}
+	cli, err := newAPIClient(f)
+	if err != nil {
+		return cliErr(err)
+	}
+	out, err := cli.GetInstanceResources(context.Background(), name)
+	if err != nil {
+		return cliErr(err)
+	}
+	if f.jsonOut {
+		return printJSON(out)
+	}
+	fmt.Printf("instance: %s (%s) status=%s sampled=%s\n", out.Name, out.InstanceID, out.Status, out.SampledAt)
+	fmt.Printf("cpu:    %.2f%% of %s cores\n", out.CPU.Percent, formatCPU(out.CPU.Cores))
+	fmt.Printf("memory: %s / %s (limit %d MiB)\n",
+		formatBytes(out.Memory.UsedBytes), formatBytes(out.Memory.TotalBytes), out.Memory.LimitMB)
+	fmt.Printf("disk:   %s / %s (limit %d GiB)\n",
+		formatBytes(out.Disk.UsedBytes), formatBytes(out.Disk.TotalBytes), out.Disk.LimitGB)
+	bwLimit := "unlimited"
+	if out.Bandwidth.LimitMbps > 0 {
+		bwLimit = fmt.Sprintf("%d Mbit", out.Bandwidth.LimitMbps)
+	}
+	monthLimit := "unlimited"
+	if out.Bandwidth.MonthlyLimitGB > 0 {
+		monthLimit = fmt.Sprintf("%d GiB", out.Bandwidth.MonthlyLimitGB)
+	}
+	fmt.Printf("bw:     rate %s; month %s / %s (%s) throttled=%v; eth0 total %s\n",
+		bwLimit,
+		formatBytes(out.Bandwidth.MonthlyUsedBytes), monthLimit, out.Bandwidth.Period,
+		out.Bandwidth.Throttled,
+		formatBytes(out.Bandwidth.TotalBytes),
+	)
+	return 0
+}
+
 func runHostStats(args []string) int {
 	fs := flag.NewFlagSet("hoststats", flag.ExitOnError)
 	f, _ := parseCLIFlags(fs, args)
@@ -393,14 +438,14 @@ func runSSHInfo(args []string) int {
 	}
 	if f.jsonOut {
 		return printJSON(map[string]any{
-			"host":          host,
-			"port":          port,
-			"user":          "root",
-			"password":      inst.RootPassword,
-			"command":       fmt.Sprintf("ssh root@%s -p %d", host, port),
-			"name":          inst.Name,
-			"id":            inst.ID.String(),
-			"ports":         apicli.PortRange(inst),
+			"host":     host,
+			"port":     port,
+			"user":     "root",
+			"password": inst.RootPassword,
+			"command":  fmt.Sprintf("ssh root@%s -p %d", host, port),
+			"name":     inst.Name,
+			"id":       inst.ID.String(),
+			"ports":    apicli.PortRange(inst),
 		})
 	}
 	fmt.Printf("ssh root@%s -p %d\n", host, port)

@@ -127,6 +127,16 @@ func (c *Client) GetInstance(ctx context.Context, idOrName string) (*models.Inst
 	return &out, nil
 }
 
+// GetInstanceResources GET /api/v1/instances/{id}/resources
+func (c *Client) GetInstanceResources(ctx context.Context, idOrName string) (*models.InstanceResourcesResponse, error) {
+	var out models.InstanceResourcesResponse
+	path := "/api/v1/instances/" + url.PathEscape(idOrName) + "/resources"
+	if err := c.do(ctx, http.MethodGet, path, nil, &out, true); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // GetInstanceUsage GET /api/v1/instances/{id}/usage?days=N
 func (c *Client) GetInstanceUsage(ctx context.Context, idOrName string, days int) (*models.UsageChartResponse, error) {
 	var out models.UsageChartResponse

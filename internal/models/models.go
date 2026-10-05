@@ -10,13 +10,13 @@ import (
 type InstanceStatus string
 
 const (
-	StatusPending   InstanceStatus = "pending"
-	StatusCreating  InstanceStatus = "creating"
-	StatusRunning   InstanceStatus = "running"
-	StatusStopped   InstanceStatus = "stopped"
-	StatusError     InstanceStatus = "error"
-	StatusDeleting  InstanceStatus = "deleting"
-	StatusDeleted   InstanceStatus = "deleted"
+	StatusPending  InstanceStatus = "pending"
+	StatusCreating InstanceStatus = "creating"
+	StatusRunning  InstanceStatus = "running"
+	StatusStopped  InstanceStatus = "stopped"
+	StatusError    InstanceStatus = "error"
+	StatusDeleting InstanceStatus = "deleting"
+	StatusDeleted  InstanceStatus = "deleted"
 )
 
 // Instance is a NAT VPS backed by an Incus LXC container.
@@ -43,12 +43,12 @@ type Instance struct {
 	// TrafficThrottled is true when the monthly quota was exceeded (NIC capped to a trickle).
 	TrafficThrottled bool `json:"traffic_throttled"`
 	// TrafficCounterSnap is the last observed Incus eth0 rx+tx total (internal accounting).
-	TrafficCounterSnap int64  `json:"-"`
-	RootPassword       string `json:"root_password,omitempty"`
-	ErrorMessage     string `json:"error_message,omitempty"`
-	Ports            []PortMapping `json:"ports,omitempty"`
-	CreatedAt        time.Time     `json:"created_at"`
-	UpdatedAt        time.Time     `json:"updated_at"`
+	TrafficCounterSnap int64         `json:"-"`
+	RootPassword       string        `json:"root_password,omitempty"`
+	ErrorMessage       string        `json:"error_message,omitempty"`
+	Ports              []PortMapping `json:"ports,omitempty"`
+	CreatedAt          time.Time     `json:"created_at"`
+	UpdatedAt          time.Time     `json:"updated_at"`
 }
 
 // PortMapping maps a host external port to a container internal port via Incus proxy.
@@ -104,10 +104,10 @@ type HealthResponse struct {
 
 // DailyUsagePoint is one UTC day of disk + bandwidth samples for charts.
 type DailyUsagePoint struct {
-	Date            string `json:"date"` // YYYY-MM-DD (UTC)
-	DiskUsedBytes   int64  `json:"disk_used_bytes"`
-	DiskTotalBytes  int64  `json:"disk_total_bytes"`
-	BandwidthBytes  int64  `json:"bandwidth_bytes"` // rx+tx transferred that day
+	Date           string `json:"date"` // YYYY-MM-DD (UTC)
+	DiskUsedBytes  int64  `json:"disk_used_bytes"`
+	DiskTotalBytes int64  `json:"disk_total_bytes"`
+	BandwidthBytes int64  `json:"bandwidth_bytes"` // rx+tx transferred that day
 }
 
 // UsageChartResponse is returned by GET /instances/{id}/usage.
@@ -122,13 +122,13 @@ type UsageChartResponse struct {
 
 // HourlyMetricsPoint is one UTC hour of CPU/RAM/disk/bandwidth for charts.
 type HourlyMetricsPoint struct {
-	Hour               string  `json:"hour"` // RFC3339 UTC hour bucket
-	CPUPercent         float64 `json:"cpu_percent"`
-	MemoryUsedBytes    int64   `json:"memory_used_bytes"`
-	MemoryTotalBytes   int64   `json:"memory_total_bytes"`
-	DiskUsedBytes      int64   `json:"disk_used_bytes"`
-	DiskTotalBytes     int64   `json:"disk_total_bytes"`
-	BandwidthBytes     int64   `json:"bandwidth_bytes"`
+	Hour             string  `json:"hour"` // RFC3339 UTC hour bucket
+	CPUPercent       float64 `json:"cpu_percent"`
+	MemoryUsedBytes  int64   `json:"memory_used_bytes"`
+	MemoryTotalBytes int64   `json:"memory_total_bytes"`
+	DiskUsedBytes    int64   `json:"disk_used_bytes"`
+	DiskTotalBytes   int64   `json:"disk_total_bytes"`
+	BandwidthBytes   int64   `json:"bandwidth_bytes"`
 }
 
 // InstanceMetricsSeries is hourly history for one VPS.
@@ -169,4 +169,46 @@ type HostDiskStats struct {
 	TotalBytes int64  `json:"total_bytes"`
 	UsedBytes  int64  `json:"used_bytes"`
 	FreeBytes  int64  `json:"free_bytes"`
+}
+
+// InstanceResourcesResponse is a live limit + usage snapshot for one VPS.
+type InstanceResourcesResponse struct {
+	InstanceID uuid.UUID         `json:"instance_id"`
+	Name       string            `json:"name"`
+	Status     InstanceStatus    `json:"status"`
+	SampledAt  string            `json:"sampled_at"` // RFC3339 UTC
+	CPU        ResourceCPU       `json:"cpu"`
+	Memory     ResourceMemory    `json:"memory"`
+	Disk       ResourceDisk      `json:"disk"`
+	Bandwidth  ResourceBandwidth `json:"bandwidth"`
+}
+
+// ResourceCPU is allocated cores and current usage percent of that allocation.
+type ResourceCPU struct {
+	Cores   float64 `json:"cores"`
+	Percent float64 `json:"percent"` // 100 = fully using allocated cores
+}
+
+// ResourceMemory is RAM limit and live usage.
+type ResourceMemory struct {
+	LimitMB    int   `json:"limit_mb"`
+	TotalBytes int64 `json:"total_bytes"`
+	UsedBytes  int64 `json:"used_bytes"`
+}
+
+// ResourceDisk is disk quota and live usage.
+type ResourceDisk struct {
+	LimitGB    int   `json:"limit_gb"`
+	TotalBytes int64 `json:"total_bytes"`
+	UsedBytes  int64 `json:"used_bytes"`
+}
+
+// ResourceBandwidth is NIC rate limit plus monthly transfer usage.
+type ResourceBandwidth struct {
+	LimitMbps        int    `json:"limit_mbps"`       // 0 = unlimited
+	MonthlyLimitGB   int    `json:"monthly_limit_gb"` // 0 = unlimited
+	MonthlyUsedBytes int64  `json:"monthly_used_bytes"`
+	Period           string `json:"period"` // UTC YYYY-MM
+	Throttled  bool  `json:"throttled"`
+	TotalBytes int64 `json:"total_bytes"` // cumulative eth0 rx+tx from Incus
 }

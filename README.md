@@ -136,6 +136,7 @@ goincus repair web-1
 goincus usage web-1 -days 30          # daily disk + bandwidth for charts
 goincus metrics -hours 24             # hourly CPU/RAM/disk/bandwidth (all VPS)
 goincus metrics web-1 -hours 24
+goincus resources web-1               # live CPU/RAM/disk/bandwidth usage
 goincus hoststats                     # free host ports + free storage-pool disk
 goincus delete web-1 -y
 ```
@@ -152,6 +153,7 @@ usage:
 ```
 
 ```http
+GET /api/v1/instances/{id|name}/resources
 GET /api/v1/instances/{id|name}/usage?days=30
 GET /api/v1/metrics?hours=24
 GET /api/v1/instances/{id|name}/metrics?hours=24

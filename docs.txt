@@ -34,6 +34,7 @@ ENDPOINTS (summary)
   GET    /api/v1/instances/
   POST   /api/v1/instances/
   GET    /api/v1/instances/{id|name}
+  GET    /api/v1/instances/{id|name}/resources
   GET    /api/v1/instances/{id|name}/usage?days=30
   GET    /api/v1/instances/{id|name}/metrics?hours=24
   DELETE /api/v1/instances/{id|name}
@@ -203,6 +204,54 @@ Status: 200
 
 Response: Instance including root_password, ports[], traffic_* fields.
 Status is refreshed from Incus when possible.
+
+
+------------------------------------------------------------------------------
+4b) LIVE RESOURCES (CPU / RAM / disk / bandwidth)
+------------------------------------------------------------------------------
+
+GET /api/v1/instances/{id|name}/resources
+
+Auth: required
+Status: 200
+
+Live snapshot of limits + current usage for one VPS.
+CPU percent is measured over a ~1s sample (100 = fully using allocated cores).
+
+Response:
+  {
+    "instance_id": "uuid",
+    "name": "web-1",
+    "status": "running",
+    "sampled_at": "2026-10-05T00:35:00Z",
+    "cpu": {
+      "cores": 0.5,
+      "percent": 12.5
+    },
+    "memory": {
+      "limit_mb": 512,
+      "total_bytes": 536870912,
+      "used_bytes": 120000000
+    },
+    "disk": {
+      "limit_gb": 10,
+      "total_bytes": 10737418240,
+      "used_bytes": 790630400
+    },
+    "bandwidth": {
+      "limit_mbps": 100,
+      "monthly_limit_gb": 1024,
+      "monthly_used_bytes": 45000000,
+      "period": "2026-10",
+      "throttled": false,
+      "total_bytes": 88000000
+    }
+  }
+
+Notes:
+  - memory/disk *_bytes come from Incus instance state (fallback to configured limits).
+  - bandwidth.limit_mbps is the NIC rate cap (0 = unlimited).
+  - bandwidth.monthly_* is calendar-month transfer (rx+tx); total_bytes is cumulative eth0.
 
 
 ------------------------------------------------------------------------------
@@ -453,6 +502,7 @@ CLI (talks to the same API)
   goincus start|stop|restart|repair <name|id>
   goincus usage <name|id> [-days 30] [-json]
   goincus metrics [name|id] [-hours 24] [-json]
+  goincus resources <name|id> [-json]
   goincus hoststats [-json]
   goincus ssh <name|id> [-host YOUR.PUBLIC.IP]
   goincus delete <name|id> [-y]
@@ -480,6 +530,10 @@ curl -s -X POST http://127.0.0.1:9603/api/v1/instances/ \
 
 # Get
 curl -s http://127.0.0.1:9603/api/v1/instances/web-1 \
+  -H "Authorization: Bearer gic_xxx"
+
+# Live resources (CPU/RAM/disk/bandwidth)
+curl -s http://127.0.0.1:9603/api/v1/instances/web-1/resources \
   -H "Authorization: Bearer gic_xxx"
 
 # Usage chart (daily)
