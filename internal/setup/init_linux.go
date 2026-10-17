@@ -460,6 +460,9 @@ func installSupportFiles() error {
 	if err := os.MkdirAll("/var/log/goincus", 0o755); err != nil {
 		return err
 	}
+	if err := os.MkdirAll("/var/lib/goincus", 0o755); err != nil {
+		return err
+	}
 	if err := os.MkdirAll("/opt/goincus", 0o755); err != nil {
 		return err
 	}
